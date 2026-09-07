@@ -10,9 +10,11 @@
   width: 100%;
   min-width: 0;
   margin: 0.5em 0;
-  padding: 0.65em 0;
-  border-block: 1px solid var(--sam-border);
-  background: transparent;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--sam-accent) 55%, var(--sam-border));
+  border-radius: 0.6em;
+  background: color-mix(in srgb, var(--sam-text) 4%, var(--sam-surface));
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--sam-text) 8%, transparent);
   color: var(--sam-text);
   font: inherit;
   line-height: 1.45;
@@ -30,8 +32,38 @@
   flex-wrap: wrap;
   gap: 0.4em;
 }
-#st-api-account-manager .sam-header { margin-bottom: 0.6em; }
-#st-api-account-manager :where(.sam-header h4, .sam-form-heading h4) { font-size: 1em; color: inherit; }
+#st-api-account-manager > .sam-header {
+  min-height: 3.4em;
+  padding: 0.65em 0.75em;
+  flex-wrap: nowrap;
+  gap: 0.65em;
+  border-radius: 0.55em;
+  background: color-mix(in srgb, var(--sam-accent) 12%, transparent);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+#st-api-account-manager > .sam-header::-webkit-details-marker { display: none; }
+#st-api-account-manager > .sam-header:hover { background: color-mix(in srgb, var(--sam-accent) 20%, transparent); }
+#st-api-account-manager > .sam-header::after {
+  content: '';
+  flex: 0 0 0.5em;
+  height: 0.5em;
+  border-right: 2px solid var(--sam-accent);
+  border-bottom: 2px solid var(--sam-accent);
+  transform: rotate(45deg);
+}
+#st-api-account-manager[open] > .sam-header { border-radius: 0.55em 0.55em 0 0; border-bottom: 1px solid var(--sam-border); }
+#st-api-account-manager[open] > .sam-header::after { transform: rotate(225deg); }
+#st-api-account-manager .sam-card-icon { color: var(--sam-accent); font-size: 1.15em; }
+#st-api-account-manager .sam-header-text { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 0.1em; }
+#st-api-account-manager .sam-title { color: var(--sam-text); font-size: 1em; font-weight: 700; }
+#st-api-account-manager .sam-toggle-label { color: var(--sam-accent); font-size: 0.8em; white-space: nowrap; }
+#st-api-account-manager .sam-collapse-label,
+#st-api-account-manager[open] .sam-expand-label { display: none; }
+#st-api-account-manager[open] .sam-collapse-label { display: inline; }
+#st-api-account-manager .sam-content { min-width: 0; padding: 0.75em; }
+#st-api-account-manager .sam-form-heading h4 { font-size: 1em; color: inherit; }
 #st-api-account-manager :where(.sam-muted, .sam-help, .sam-status) {
   color: var(--sam-muted);
   font-size: 0.82em;
@@ -113,8 +145,6 @@
 #st-api-account-manager :where(input, select, button, summary):focus-visible { outline: 2px solid var(--sam-accent); outline-offset: 2px; }
 #st-api-account-manager .sam-help { margin-top: 0.3em; }
 #st-api-account-manager .sam-form-balance { margin-bottom: 0.65em; }
-#st-api-account-manager .sam-advanced { padding-top: 0.3em; }
-#st-api-account-manager .sam-advanced summary { margin-bottom: 0.6em; color: var(--sam-muted); font-size: 0.85em; cursor: pointer; }
 #st-api-account-manager .sam-form-actions { display: flex; justify-content: flex-end; margin-top: 0.55em; }
 #st-api-account-manager .sam-status { margin-top: 0.55em; }
 #st-api-account-manager .sam-status-error { color: var(--sam-text); text-decoration: underline dotted var(--sam-accent); }
