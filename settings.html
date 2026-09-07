@@ -10,10 +10,11 @@
   </summary>
   <div class="sam-content">
 
+    <div id="sam-group-tabs" class="sam-group-tabs" role="group" aria-label="账户分组"></div>
     <div class="sam-list-tools">
       <button id="sam-refresh-all" class="menu_button sam-button sam-button-small" type="button">刷新全部余额</button>
     </div>
-    <div id="sam-account-list" class="sam-account-list" role="region" aria-label="已保存的 API 分组">
+    <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
       <div class="sam-empty">还没有保存的 API，在下方填写信息即可添加。</div>
     </div>
     <div class="sam-refresh-settings">
@@ -48,7 +49,7 @@
 
       <div class="sam-field">
         <label for="sam-base-url">API 基础地址 *</label>
-        <input id="sam-base-url" name="baseUrl" class="text_pole sam-control" type="url" required placeholder="https://api.example.com/v1" spellcheck="false" />
+        <input id="sam-base-url" name="baseUrl" class="text_pole sam-control" type="url" required placeholder="https://api.example.com" spellcheck="false" />
       </div>
       <div class="sam-field">
         <label for="sam-api-key">API Key *</label>
@@ -69,7 +70,7 @@
       </div>
 
       <div class="sam-balance-row sam-form-balance">
-        <output id="sam-form-balance" class="sam-account-balance" aria-live="polite">余额：保存后可查询</output>
+        <output id="sam-form-balance" class="sam-account-balance" aria-live="polite">账户余额：保存后可查询</output>
         <button id="sam-fetch-balance" class="menu_button sam-button sam-button-small" type="button" disabled>查询余额</button>
       </div>
       <div class="sam-form-actions">
