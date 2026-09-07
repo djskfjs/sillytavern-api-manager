@@ -1,0 +1,14 @@
+# Local/editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Never commit local SillyTavern settings or secrets
+*.local.json
+settings.json
+secrets.json
+
+# Local SillyTavern reference files
+/st-extensions-*.js
+/st-public*
