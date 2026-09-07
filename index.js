@@ -10,6 +10,7 @@ import { extension_settings } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
+const EXTENSION_VERSION = '1.1.0';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 1;
 
@@ -317,11 +318,13 @@ function clearForm() {
     }
     formModels = [];
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = true;
-    if ($('#sam-save-account')) $('#sam-save-account').textContent = '保存账户';
+    if ($('#sam-save-account')) $('#sam-save-account').textContent = '保存 API';
+    if ($('#sam-form-title')) $('#sam-form-title').textContent = '添加 API';
     if ($('#sam-api-key')) {
         $('#sam-api-key').required = true;
         $('#sam-api-key').placeholder = 'sk-…';
     }
+    updateFormBalance();
     setStatus('就绪');
 }
 
@@ -342,16 +345,18 @@ function fillForm(account) {
         if (input) input.value = value;
     }
     const preset = $('#sam-preset');
-    if (preset) preset.value = PRESETS[account.provider] ? account.provider : '';
+    if (preset) preset.value = account.provider !== 'custom' && PRESETS[account.provider] ? account.provider : '';
     formModels = [...account.models];
     populateModelSelect(formModels, account.selectedModel);
     renderModelChips(formModels);
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = false;
-    if ($('#sam-save-account')) $('#sam-save-account').textContent = '更新账户';
+    if ($('#sam-save-account')) $('#sam-save-account').textContent = '更新 API';
+    if ($('#sam-form-title')) $('#sam-form-title').textContent = '编辑 API';
     if ($('#sam-api-key')) {
         $('#sam-api-key').required = false;
         $('#sam-api-key').placeholder = account.apiKey ? '留空以保留当前 Key' : 'sk-…';
     }
+    updateFormBalance();
     setStatus(`正在编辑：${account.name}`);
 }
 
@@ -613,9 +618,24 @@ function formatTime(timestamp) {
     try { return new Date(timestamp).toLocaleString(); } catch { return ''; }
 }
 
+function updateFormBalance() {
+    const account = settings.accounts.find(item => item.id === $('#sam-account-id')?.value);
+    const output = $('#sam-form-balance');
+    if (output) {
+        output.textContent = account ? formatBalance(account.balance) : '余额：保存后可查询';
+        output.dataset.state = account?.balance?.status || 'unknown';
+    }
+    const button = $('#sam-fetch-balance');
+    if (button) {
+        button.disabled = !account || account.balance?.status === 'loading';
+        button.textContent = account?.balance?.status === 'loading' ? '查询中…' : '查询余额';
+    }
+}
+
 function createAccountCard(account) {
     const item = document.createElement('article');
     item.className = 'sam-account-item';
+    item.setAttribute('role', 'listitem');
     item.dataset.accountId = account.id;
     if (account.id === settings.selectedAccountId) item.classList.add('sam-selected');
 
@@ -649,10 +669,22 @@ function createAccountCard(account) {
     model.className = 'sam-account-model';
     model.textContent = account.selectedModel ? `模型：${account.selectedModel}` : `模型：${account.models.length ? `${account.models.length} 个可用` : '未选择'}`;
     item.append(model);
-    const balance = document.createElement('div');
+    const balanceRow = document.createElement('div');
+    balanceRow.className = 'sam-balance-row';
+    const balance = document.createElement('output');
     balance.className = 'sam-account-balance';
+    balance.dataset.state = account.balance?.status || 'unknown';
     balance.textContent = formatBalance(account.balance);
-    item.append(balance);
+    const balanceButton = document.createElement('button');
+    balanceButton.type = 'button';
+    balanceButton.className = 'menu_button sam-button sam-button-small';
+    balanceButton.dataset.action = 'balance';
+    balanceButton.dataset.accountId = account.id;
+    balanceButton.textContent = account.balance?.status === 'loading' ? '查询中…' : '刷新余额';
+    balanceButton.disabled = account.balance?.status === 'loading';
+    balanceButton.setAttribute('aria-label', `查询 ${account.name} 的余额`);
+    balanceRow.append(balance, balanceButton);
+    item.append(balanceRow);
     if (account.balance?.fetchedAt) {
         const time = document.createElement('div');
         time.className = 'sam-account-time';
@@ -665,14 +697,13 @@ function createAccountCard(account) {
     const actionDefinitions = [
         ['edit', '编辑', '编辑账户'],
         ['models', '模型', '刷新模型列表'],
-        ['balance', '余额', '查询余额'],
         ['apply', '应用', '应用到酒馆当前连接'],
         ['delete', '删除', '删除账户'],
     ];
     for (const [action, label, titleText] of actionDefinitions) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `sam-button ${action === 'delete' ? 'sam-button-quiet' : 'sam-button-secondary'}`;
+        button.className = `menu_button sam-button ${action === 'delete' ? 'sam-button-quiet' : 'sam-button-secondary'}`;
         button.dataset.action = action;
         button.dataset.accountId = account.id;
         button.title = titleText;
@@ -700,10 +731,20 @@ function renderGroupFilter() {
         select.append(option);
     }
     select.value = groups.includes(selected) ? selected : '';
+    const suggestions = $('#sam-group-options');
+    if (suggestions) {
+        suggestions.replaceChildren(...groups.map(group => {
+            const option = document.createElement('option');
+            option.value = group;
+            return option;
+        }));
+    }
 }
 
 function renderAccounts() {
     renderGroupFilter();
+    updateFormBalance();
+    if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
     const list = $('#sam-account-list');
     if (!list) return;
     const filter = asString($('#sam-filter-group')?.value);
@@ -714,7 +755,7 @@ function renderAccounts() {
     if (!accounts.length) {
         const empty = document.createElement('div');
         empty.className = 'sam-empty';
-        empty.textContent = settings.accounts.length ? '该分组暂无账户。' : '还没有保存的账户。填写左侧表单后点击“保存账户”。';
+        empty.textContent = settings.accounts.length ? '该分组暂无账户。' : '还没有保存的 API，在下方填写信息即可添加。';
         list.append(empty);
         return;
     }
@@ -778,39 +819,27 @@ function setConnectionValue(selectors, value) {
 }
 
 function applyToSillyTavern(account) {
-    // These selectors cover the OpenAI-compatible controls used by ST 1.14.x
-    // and a few names used by adjacent minor releases. Missing controls are
-    // harmless; the user receives a precise summary below.
-    const source = findConnectionInput(['#chat_completion_source', '#api_type', 'select[name="chat_completion_source"]']);
-    let sourceSet = false;
-    if (source && source.options?.length) {
-        const option = [...source.options].find(candidate => {
-            const value = `${candidate.value} ${candidate.textContent}`.toLowerCase();
-            return value.includes('openai') || value.includes('custom');
-        });
-        if (option) {
-            source.value = option.value;
-            source.dispatchEvent(new Event('change', { bubbles: true }));
-            sourceSet = true;
-        }
-    }
-    const urlSet = setConnectionValue([
-        '#openai_custom_url', '#openai_custom_url_text', '#api_url_text', '#custom_api_url',
-        'input[name="openai_custom_url"]', 'input[name="api_url"]',
-    ], account.baseUrl);
-    const keySet = setConnectionValue([
-        '#api_key_openai', '#openai_api_key', '#api_key', 'input[name="api_key"]',
-    ], account.apiKey);
-    const modelSet = account.selectedModel ? setConnectionValue([
-        '#model_openai_select', '#openai_model', '#model', 'select[name="model"]',
-    ], account.selectedModel) : false;
-    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-    const changed = [sourceSet, urlSet, keySet, modelSet].filter(Boolean).length;
-    if (!changed) {
-        notify('没有找到酒馆连接设置控件，请先打开聊天补全设置；账户仍已保存。', 'error');
+    const main = document.querySelector('#main_api');
+    const source = document.querySelector('#chat_completion_source');
+    const controls = ['#custom_api_url_text', '#api_key_custom', '#custom_model_id'];
+    if (!main || !source || controls.some(selector => !document.querySelector(selector))
+        || ![...main.options].some(option => option.value === 'openai')
+        || ![...source.options].some(option => option.value === 'custom')) {
+        notify('当前酒馆缺少自定义聊天补全控件，请检查酒馆版本。', 'error');
         return;
     }
-    notify(`已应用 ${changed} 项连接设置${modelSet ? '' : '（模型请在酒馆下拉框中确认）'}。`, 'success');
+    // Fill the complete connection before source changes can trigger a reconnect.
+    const mainChanged = main.value !== 'openai';
+    const sourceChanged = source.value !== 'custom';
+    main.value = 'openai';
+    source.value = 'custom';
+    setConnectionValue(['#custom_api_url_text'], account.baseUrl);
+    setConnectionValue(['#api_key_custom'], account.apiKey);
+    setConnectionValue(['#custom_model_id'], account.selectedModel || '');
+    if (sourceChanged) source.dispatchEvent(new Event('change', { bubbles: true }));
+    if (mainChanged) main.dispatchEvent(new Event('change', { bubbles: true }));
+    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+    notify('已填入下方的自定义连接设置，请点击酒馆“连接”。', 'success');
 }
 
 async function handleAccountAction(event) {
@@ -874,7 +903,7 @@ function bindEvents() {
             balanceParser: draft.balanceParser,
         });
         await refreshBalance(account);
-        fillForm(account);
+        updateFormBalance();
     });
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
     $('#sam-filter-group')?.addEventListener('change', renderAccounts);
@@ -914,14 +943,26 @@ function loadSettingsIntoUi() {
 }
 
 async function loadPanel() {
-    if (rootElement()) return true;
-    const host = document.querySelector('#extensions_settings');
+    const host = document.querySelector('#rm_api_block');
     if (!host) return false;
     try {
-        const response = await fetch(new URL('./settings.html', import.meta.url));
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        host.insertAdjacentHTML('beforeend', await response.text());
-        const styleHref = new URL('./style.css', import.meta.url).href;
+        let panel = rootElement();
+        if (!panel) {
+            const panelUrl = new URL('./settings.html', import.meta.url);
+            panelUrl.searchParams.set('v', EXTENSION_VERSION);
+            const response = await fetch(panelUrl);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const template = document.createElement('template');
+            template.innerHTML = await response.text();
+            panel = template.content.querySelector(`#${SETTINGS_ROOT_ID}`);
+            if (!panel) throw new Error('API 账户面板缺少根节点');
+        }
+        const anchor = host.querySelector('#main-API-selector-block');
+        if (anchor) anchor.after(panel);
+        else host.append(panel);
+        const styleUrl = new URL('./style.css', import.meta.url);
+        styleUrl.searchParams.set('v', EXTENSION_VERSION);
+        const styleHref = styleUrl.href;
         if (!document.querySelector(`link[data-sam-style="${styleHref}"]`)) {
             const link = document.createElement('link');
             link.rel = 'stylesheet';
@@ -941,7 +982,7 @@ async function init() {
     extension_settings[EXTENSION_NAME] = settings;
     const loaded = await loadPanel();
     if (!loaded) {
-        // ST can mount extension settings a tick after importing an extension.
+        // Wait for the native API connection drawer when it mounts after imports.
         setTimeout(() => init(), 500);
         return;
     }
