@@ -1,0 +1,138 @@
+<!--
+  SillyTavern API Account Manager settings panel.
+  This file intentionally contains markup only; behaviour is wired by index.js.
+-->
+<section id="st-api-account-manager" class="sam-panel" aria-labelledby="sam-title">
+  <header class="sam-header">
+    <div>
+      <h2 id="sam-title" class="sam-title">API 账户管理</h2>
+      <p class="sam-subtitle">集中保存常用 API、模型和余额信息，方便在不同服务之间切换。</p>
+    </div>
+    <span id="sam-status" class="sam-status" role="status" aria-live="polite">就绪</span>
+  </header>
+
+  <div class="sam-layout">
+    <div class="sam-main-column">
+      <form id="sam-account-form" class="sam-card sam-form" autocomplete="off">
+        <div class="sam-card-heading">
+          <h3>账户信息</h3>
+          <span class="sam-muted">带 * 的项目为必填项</span>
+        </div>
+
+        <div class="sam-field sam-field-full">
+          <label for="sam-preset">常用 API</label>
+          <select id="sam-preset" name="preset" class="sam-control">
+            <option value="">自定义（手动填写）</option>
+          </select>
+          <p class="sam-help">选择预设后会自动填写服务地址；API Key 仍只保存在本地。</p>
+        </div>
+
+        <div class="sam-field-grid">
+          <div class="sam-field">
+            <label for="sam-name"><span aria-hidden="true">*</span>账户名称</label>
+            <input id="sam-name" name="name" class="sam-control" type="text" required maxlength="80" placeholder="例如：工作用 OpenAI" />
+          </div>
+          <div class="sam-field">
+            <label for="sam-group">分组名称</label>
+            <input id="sam-group" name="group" class="sam-control" type="text" maxlength="60" placeholder="例如：生产环境" />
+          </div>
+          <input id="sam-account-id" name="accountId" type="hidden" />
+        </div>
+
+        <div class="sam-field">
+          <label for="sam-base-url"><span aria-hidden="true">*</span>API 基础地址</label>
+          <input id="sam-base-url" name="baseUrl" class="sam-control sam-mono" type="url" required placeholder="https://api.example.com/v1" spellcheck="false" />
+          <p class="sam-help">填写服务商的 OpenAI 兼容接口根地址（通常以 /v1 结尾）。</p>
+        </div>
+
+        <div class="sam-field">
+          <label for="sam-api-key"><span aria-hidden="true">*</span>API Key</label>
+          <div class="sam-secret-wrap">
+            <input id="sam-api-key" name="apiKey" class="sam-control sam-mono" type="password" required placeholder="sk-…" spellcheck="false" autocomplete="new-password" />
+            <button id="sam-key-toggle" class="sam-icon-button" type="button" aria-label="显示 API Key" aria-pressed="false" title="显示或隐藏 API Key">显示</button>
+          </div>
+          <p class="sam-help">Key 仅在本地保存，界面默认隐藏中间字符。</p>
+        </div>
+
+        <div class="sam-field sam-field-full">
+          <div class="sam-label-row">
+            <label for="sam-model-select">模型</label>
+            <button id="sam-fetch-models" class="sam-button sam-button-secondary sam-button-small" type="button">获取模型</button>
+          </div>
+          <select id="sam-model-select" name="model" class="sam-control" aria-describedby="sam-model-help">
+            <option value="">请先获取模型</option>
+          </select>
+          <div id="sam-models" class="sam-models" role="region" aria-label="可用模型列表" aria-live="polite">
+            <span class="sam-muted">尚未获取模型列表。</span>
+          </div>
+          <p id="sam-model-help" class="sam-help">获取后可从下拉菜单中选择默认模型；列表会随账户保存。</p>
+        </div>
+
+        <details class="sam-advanced">
+          <summary>余额查询设置（可选）</summary>
+          <div class="sam-advanced-body">
+            <div class="sam-field">
+              <label for="sam-balance-url">余额接口地址</label>
+              <input id="sam-balance-url" name="balanceUrl" class="sam-control sam-mono" type="url" placeholder="留空则使用基础地址" spellcheck="false" />
+            </div>
+            <div class="sam-field-grid">
+              <div class="sam-field">
+                <label for="sam-balance-path">余额字段路径</label>
+                <input id="sam-balance-path" name="balancePath" class="sam-control sam-mono" type="text" placeholder="data.balance" spellcheck="false" />
+                <p class="sam-help">支持点号路径，例如 data.balance。</p>
+              </div>
+              <div class="sam-field">
+                <label for="sam-balance-currency">货币单位</label>
+                <input id="sam-balance-currency" name="balanceCurrency" class="sam-control" type="text" maxlength="12" placeholder="USD" />
+              </div>
+            </div>
+            <div class="sam-inline-actions">
+              <button id="sam-fetch-balance" class="sam-button sam-button-secondary" type="button">查询余额</button>
+              <span class="sam-help sam-inline-help">查询结果显示在下方账户列表中。</span>
+            </div>
+          </div>
+        </details>
+
+        <div class="sam-form-actions">
+          <button id="sam-save-account" class="sam-button sam-button-primary" type="submit">保存账户</button>
+          <button id="sam-cancel-edit" class="sam-button sam-button-quiet" type="button" hidden>取消编辑</button>
+        </div>
+      </form>
+    </div>
+
+    <aside class="sam-side-column" aria-label="已保存账户">
+      <div class="sam-card sam-accounts-card">
+        <div class="sam-card-heading sam-card-heading-wrap">
+          <div>
+            <h3>已保存账户</h3>
+            <span class="sam-muted">点击账户可编辑</span>
+          </div>
+          <button id="sam-refresh-all" class="sam-button sam-button-secondary sam-button-small" type="button">刷新全部</button>
+        </div>
+
+        <div class="sam-list-tools">
+          <label class="sam-visually-hidden" for="sam-filter-group">按分组筛选</label>
+          <select id="sam-filter-group" class="sam-control" aria-label="按分组筛选">
+            <option value="">全部分组</option>
+          </select>
+        </div>
+
+        <div id="sam-account-list" class="sam-account-list" role="list" aria-live="polite" aria-label="账户列表">
+          <div class="sam-empty">还没有保存的账户。填写左侧表单后点击“保存账户”。</div>
+        </div>
+
+        <div class="sam-refresh-settings">
+          <label class="sam-check-row" for="sam-auto-refresh">
+            <input id="sam-auto-refresh" name="autoRefresh" type="checkbox" />
+            <span>自动刷新余额</span>
+          </label>
+          <div class="sam-interval-row">
+            <label for="sam-refresh-interval">刷新间隔</label>
+            <input id="sam-refresh-interval" name="refreshInterval" class="sam-control sam-number" type="number" min="1" max="1440" step="1" value="30" inputmode="numeric" />
+            <span>分钟</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</section>
