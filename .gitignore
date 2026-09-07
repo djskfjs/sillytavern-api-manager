@@ -12,3 +12,6 @@ secrets.json
 # Local SillyTavern reference files
 /st-extensions-*.js
 /st-public*
+
+# Local integration previews and verification artifacts
+/.test-artifacts/
