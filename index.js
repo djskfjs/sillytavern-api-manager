@@ -10,7 +10,7 @@ import { extension_settings } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.1.0';
+const EXTENSION_VERSION = '1.1.1';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 1;
 
@@ -24,8 +24,8 @@ const DEFAULT_SETTINGS = Object.freeze({
 
 /**
  * The presets deliberately use OpenAI-compatible model endpoints whenever
- * possible.  A preset is only a convenience: users can edit every URL and
- * field after choosing it.
+ * possible. Users can change the API base URL; balance endpoints and parsing
+ * are provided by the preset without extra form fields.
  */
 const PRESETS = Object.freeze({
     openai: {
@@ -252,13 +252,7 @@ function populatePresets() {
 function applyPreset(key) {
     const preset = getPreset(key);
     const base = $('#sam-base-url');
-    const balanceUrl = $('#sam-balance-url');
-    const balancePath = $('#sam-balance-path');
-    const currency = $('#sam-balance-currency');
     if (base && preset.baseUrl) base.value = preset.baseUrl;
-    if (balanceUrl) balanceUrl.value = preset.balanceUrl || '';
-    if (balancePath) balancePath.value = preset.balancePath || '';
-    if (currency && preset.currency) currency.value = preset.currency;
     if ($('#sam-name') && !$('#sam-name').value.trim() && preset.label) $('#sam-name').value = preset.label;
     setStatus(preset.baseUrl ? `已填入 ${preset.label} 预设` : '请填写自定义 API 地址');
 }
@@ -268,8 +262,12 @@ function readForm() {
     const existing = settings.accounts.find(account => account.id === accountId);
     const enteredKey = asString($('#sam-api-key')?.value);
     const apiKey = enteredKey || existing?.apiKey || '';
-    const presetKey = asString($('#sam-preset')?.value);
+    const presetKey = asString($('#sam-preset')?.value) || 'custom';
     const preset = getPreset(presetKey);
+    const baseUrl = normalizeUrl($('#sam-base-url')?.value);
+    // Keep saved balance support when only the account name or group changes.
+    const sameService = existing && (existing.provider || 'custom') === presetKey
+        && normalizeUrl(existing.baseUrl) === baseUrl;
     const selectedModel = asString($('#sam-model-select')?.value).trim();
     const models = [...new Set([
         ...formModels,
@@ -281,15 +279,15 @@ function readForm() {
         name: asString($('#sam-name')?.value).trim(),
         group: asString($('#sam-group')?.value).trim(),
         provider: presetKey,
-        baseUrl: normalizeUrl($('#sam-base-url')?.value),
+        baseUrl,
         apiKey,
         models,
         selectedModel,
-        balanceUrl: asString($('#sam-balance-url')?.value).trim() || asString(preset.balanceUrl),
-        balancePath: asString($('#sam-balance-path')?.value).trim() || asString(preset.balancePath),
-        balanceCurrency: asString($('#sam-balance-currency')?.value).trim() || asString(preset.currency),
-        balanceParser: preset.balanceParser || 'generic',
-        balance: existing?.balance || normalizeBalance(null),
+        balanceUrl: sameService ? existing.balanceUrl : asString(preset.balanceUrl),
+        balancePath: sameService ? existing.balancePath : asString(preset.balancePath),
+        balanceCurrency: sameService ? existing.balanceCurrency : asString(preset.currency),
+        balanceParser: sameService ? existing.balanceParser : preset.balanceParser || 'generic',
+        balance: sameService && apiKey === existing.apiKey ? existing.balance : normalizeBalance(null),
         createdAt: existing?.createdAt || Date.now(),
         updatedAt: Date.now(),
     };
@@ -336,9 +334,6 @@ function fillForm(account) {
         '#sam-group': account.group,
         '#sam-base-url': account.baseUrl,
         '#sam-api-key': '',
-        '#sam-balance-url': account.balanceUrl,
-        '#sam-balance-path': account.balancePath,
-        '#sam-balance-currency': account.balanceCurrency,
     };
     for (const [selector, value] of Object.entries(values)) {
         const input = $(selector);
@@ -564,7 +559,7 @@ async function fetchModelsForDraft() {
 async function refreshBalance(account, options = {}) {
     const url = balanceUrlFor(account);
     if (!url) {
-        account.balance = { status: 'unsupported', value: null, currency: account.balanceCurrency, message: '未配置余额接口', fetchedAt: Date.now() };
+        account.balance = { status: 'unsupported', value: null, currency: account.balanceCurrency, message: '暂不支持余额查询', fetchedAt: Date.now() };
         account.updatedAt = Date.now();
         persist();
         renderAccounts();
@@ -575,7 +570,7 @@ async function refreshBalance(account, options = {}) {
     try {
         const payload = await requestJson(url, account.apiKey);
         const parsed = parseBalance(payload, account);
-        if (!parsed) throw new Error('未找到余额字段，请填写余额字段路径');
+        if (!parsed) throw new Error('当前服务商的余额返回格式暂不支持');
         account.balance = { status: 'ok', value: parsed.value, currency: parsed.currency || account.balanceCurrency, message: '', fetchedAt: Date.now() };
         account.updatedAt = Date.now();
         persist();
@@ -606,7 +601,7 @@ async function refreshAllBalances(options = {}) {
 function formatBalance(balance) {
     if (!balance) return '余额：未查询';
     if (balance.status === 'loading') return '余额：查询中…';
-    if (balance.status === 'unsupported') return `余额：${balance.message || '未配置接口'}`;
+    if (balance.status === 'unsupported') return '余额：暂不支持查询';
     if (balance.status === 'error') return `余额：查询失败（${balance.message || '未知错误'}）`;
     if (balance.status !== 'ok' || balance.value == null) return '余额：未查询';
     const value = typeof balance.value === 'number' ? balance.value.toLocaleString(undefined, { maximumFractionDigits: 8 }) : String(balance.value);
@@ -895,6 +890,7 @@ function bindEvents() {
         }
         const draft = readForm();
         Object.assign(account, {
+            provider: draft.provider,
             baseUrl: draft.baseUrl,
             apiKey: draft.apiKey,
             balanceUrl: draft.balanceUrl,
@@ -943,8 +939,9 @@ function loadSettingsIntoUi() {
 }
 
 async function loadPanel() {
-    const host = document.querySelector('#rm_api_block');
-    if (!host) return false;
+    const host = document.querySelector('#openai_api');
+    const source = host?.querySelector('#chat_completion_source');
+    if (!source) return false;
     try {
         let panel = rootElement();
         if (!panel) {
@@ -957,9 +954,7 @@ async function loadPanel() {
             panel = template.content.querySelector(`#${SETTINGS_ROOT_ID}`);
             if (!panel) throw new Error('API 账户面板缺少根节点');
         }
-        const anchor = host.querySelector('#main-API-selector-block');
-        if (anchor) anchor.after(panel);
-        else host.append(panel);
+        source.after(panel);
         const styleUrl = new URL('./style.css', import.meta.url);
         styleUrl.searchParams.set('v', EXTENSION_VERSION);
         const styleHref = styleUrl.href;
