@@ -1,4 +1,4 @@
-<!-- A collapsible account card below SillyTavern's chat completion source. -->
+<!-- A collapsible account card below SillyTavern's available models. -->
 <details id="st-api-account-manager" class="sam-panel" aria-labelledby="sam-title">
   <summary class="sam-header">
     <span class="sam-card-icon fa-solid fa-address-card" aria-hidden="true"></span>
@@ -11,13 +11,9 @@
   <div class="sam-content">
 
     <div class="sam-list-tools">
-      <label for="sam-filter-group">分组</label>
-      <select id="sam-filter-group" class="text_pole sam-control" aria-label="按分组筛选">
-        <option value="">全部分组</option>
-      </select>
       <button id="sam-refresh-all" class="menu_button sam-button sam-button-small" type="button">刷新全部余额</button>
     </div>
-    <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
+    <div id="sam-account-list" class="sam-account-list" role="region" aria-label="已保存的 API 分组">
       <div class="sam-empty">还没有保存的 API，在下方填写信息即可添加。</div>
     </div>
     <div class="sam-refresh-settings">
@@ -50,12 +46,6 @@
         </div>
       </div>
 
-      <div class="sam-field">
-        <label for="sam-preset">服务商</label>
-        <select id="sam-preset" name="preset" class="text_pole sam-control">
-          <option value="">自定义（手动填写）</option>
-        </select>
-      </div>
       <div class="sam-field">
         <label for="sam-base-url">API 基础地址 *</label>
         <input id="sam-base-url" name="baseUrl" class="text_pole sam-control" type="url" required placeholder="https://api.example.com/v1" spellcheck="false" />
