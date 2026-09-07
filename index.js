@@ -8,9 +8,10 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { saveSettingsDebounced } from '../../../../script.js';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.2.0';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.1.1';
+const EXTENSION_VERSION = '1.2.0';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 1;
 
@@ -18,91 +19,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     version: SETTINGS_VERSION,
     accounts: [],
     selectedAccountId: '',
+    expandedGroups: [],
     autoRefresh: true,
     refreshInterval: 30,
-});
-
-/**
- * The presets deliberately use OpenAI-compatible model endpoints whenever
- * possible. Users can change the API base URL; balance endpoints and parsing
- * are provided by the preset without extra form fields.
- */
-const PRESETS = Object.freeze({
-    openai: {
-        label: 'OpenAI',
-        baseUrl: 'https://api.openai.com/v1',
-        modelPath: '/models',
-        balancePath: '',
-        balanceParser: 'generic',
-        currency: 'USD',
-    },
-    deepseek: {
-        label: 'DeepSeek',
-        baseUrl: 'https://api.deepseek.com/v1',
-        modelPath: '/models',
-        balanceUrl: 'https://api.deepseek.com/user/balance',
-        balancePath: 'balance_infos.0.total_balance',
-        balanceParser: 'deepseek',
-        currency: 'CNY',
-    },
-    openrouter: {
-        label: 'OpenRouter',
-        baseUrl: 'https://openrouter.ai/api/v1',
-        modelPath: '/models',
-        balanceUrl: 'https://openrouter.ai/api/v1/credits',
-        balancePath: '',
-        balanceParser: 'openrouter',
-        currency: 'USD',
-    },
-    siliconflow: {
-        label: '硅基流动 SiliconFlow',
-        baseUrl: 'https://api.siliconflow.cn/v1',
-        modelPath: '/models',
-        balanceUrl: 'https://api.siliconflow.cn/user/info',
-        balancePath: 'data.balance',
-        balanceParser: 'siliconflow',
-        currency: 'CNY',
-    },
-    moonshot: {
-        label: '月之暗面 Kimi',
-        baseUrl: 'https://api.moonshot.cn/v1',
-        modelPath: '/models',
-        balancePath: '',
-        balanceParser: 'generic',
-        currency: 'CNY',
-    },
-    zhipu: {
-        label: '智谱 GLM',
-        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-        modelPath: '/models',
-        balancePath: '',
-        balanceParser: 'generic',
-        currency: 'CNY',
-    },
-    groq: {
-        label: 'Groq',
-        baseUrl: 'https://api.groq.com/openai/v1',
-        modelPath: '/models',
-        balancePath: '',
-        balanceParser: 'generic',
-        currency: 'USD',
-    },
-    together: {
-        label: 'Together AI',
-        baseUrl: 'https://api.together.xyz/v1',
-        modelPath: '/models',
-        balancePath: '',
-        balanceParser: 'generic',
-        currency: 'USD',
-    },
-    custom: {
-        label: '自定义（OpenAI 兼容）',
-        baseUrl: '',
-        modelPath: '/models',
-        balancePath: '',
-        balanceParser: 'generic',
-        currency: 'USD',
-    },
 });
 
 let settings;
@@ -110,6 +29,8 @@ let refreshTimer = null;
 let formModels = [];
 let isLoadingModels = false;
 let isLoadingBalance = false;
+let isApplyingAccount = false;
+const activeBalanceQueries = new Map();
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -159,6 +80,7 @@ function normalizeBalance(balance) {
         status: ['ok', 'loading', 'error', 'unsupported', 'unknown'].includes(balance.status) ? balance.status : 'unknown',
         value: balance.value == null ? null : balance.value,
         currency: asString(balance.currency),
+        kind: ['balance', 'available', 'token', 'quota'].includes(balance.kind) ? balance.kind : 'balance',
         message: asString(balance.message),
         fetchedAt: Number.isFinite(Number(balance.fetchedAt)) ? Number(balance.fetchedAt) : 0,
     };
@@ -178,7 +100,7 @@ function normalizeAccount(account) {
         group: asString(source.group).trim(),
         provider: asString(source.provider),
         baseUrl: normalizeUrl(source.baseUrl),
-        apiKey: asString(source.apiKey),
+        apiKey: asString(source.apiKey).trim(),
         models: uniqueModels,
         selectedModel,
         balanceUrl: asString(source.balanceUrl).trim(),
@@ -194,6 +116,11 @@ function normalizeAccount(account) {
 function normalizeSettings(raw) {
     const source = raw && typeof raw === 'object' ? raw : {};
     const accounts = Array.isArray(source.accounts) ? source.accounts.map(normalizeAccount) : [];
+    // Requests do not survive a page reload, even if another save persisted
+    // their temporary loading state.
+    for (const account of accounts) {
+        if (account.balance.status === 'loading') account.balance.status = 'unknown';
+    }
     const selected = asString(source.selectedAccountId);
     return {
         ...DEFAULT_SETTINGS,
@@ -201,6 +128,8 @@ function normalizeSettings(raw) {
         version: SETTINGS_VERSION,
         accounts,
         selectedAccountId: accounts.some(account => account.id === selected) ? selected : '',
+        expandedGroups: Array.isArray(source.expandedGroups)
+            ? [...new Set(source.expandedGroups.filter(group => typeof group === 'string'))] : [],
         autoRefresh: source.autoRefresh !== false,
         refreshInterval: clampInteger(source.refreshInterval, 1, 1440, DEFAULT_SETTINGS.refreshInterval),
     };
@@ -231,43 +160,14 @@ function notify(message, kind = 'info') {
     setStatus(message, kind === 'error' ? 'error' : kind === 'success' ? 'success' : '');
 }
 
-function getPreset(key) {
-    return PRESETS[key] || PRESETS.custom;
-}
-
-function populatePresets() {
-    const select = $('#sam-preset');
-    if (!select) return;
-    // Keep the first custom option supplied by settings.html and add the rest once.
-    const existing = new Set($$('option', select).map(option => option.value));
-    for (const [key, preset] of Object.entries(PRESETS)) {
-        if (key === 'custom' || existing.has(key)) continue;
-        const option = document.createElement('option');
-        option.value = key;
-        option.textContent = preset.label;
-        select.append(option);
-    }
-}
-
-function applyPreset(key) {
-    const preset = getPreset(key);
-    const base = $('#sam-base-url');
-    if (base && preset.baseUrl) base.value = preset.baseUrl;
-    if ($('#sam-name') && !$('#sam-name').value.trim() && preset.label) $('#sam-name').value = preset.label;
-    setStatus(preset.baseUrl ? `已填入 ${preset.label} 预设` : '请填写自定义 API 地址');
-}
-
 function readForm() {
     const accountId = asString($('#sam-account-id')?.value).trim();
     const existing = settings.accounts.find(account => account.id === accountId);
-    const enteredKey = asString($('#sam-api-key')?.value);
+    const enteredKey = asString($('#sam-api-key')?.value).trim();
     const apiKey = enteredKey || existing?.apiKey || '';
-    const presetKey = asString($('#sam-preset')?.value) || 'custom';
-    const preset = getPreset(presetKey);
     const baseUrl = normalizeUrl($('#sam-base-url')?.value);
     // Keep saved balance support when only the account name or group changes.
-    const sameService = existing && (existing.provider || 'custom') === presetKey
-        && normalizeUrl(existing.baseUrl) === baseUrl;
+    const sameService = existing && normalizeUrl(existing.baseUrl) === baseUrl;
     const selectedModel = asString($('#sam-model-select')?.value).trim();
     const models = [...new Set([
         ...formModels,
@@ -278,15 +178,15 @@ function readForm() {
         id: accountId || makeId(),
         name: asString($('#sam-name')?.value).trim(),
         group: asString($('#sam-group')?.value).trim(),
-        provider: presetKey,
+        provider: identifyProvider(baseUrl),
         baseUrl,
         apiKey,
         models,
         selectedModel,
-        balanceUrl: sameService ? existing.balanceUrl : asString(preset.balanceUrl),
-        balancePath: sameService ? existing.balancePath : asString(preset.balancePath),
-        balanceCurrency: sameService ? existing.balanceCurrency : asString(preset.currency),
-        balanceParser: sameService ? existing.balanceParser : preset.balanceParser || 'generic',
+        balanceUrl: sameService ? existing.balanceUrl : '',
+        balancePath: sameService ? existing.balancePath : '',
+        balanceCurrency: sameService ? existing.balanceCurrency : '',
+        balanceParser: sameService ? existing.balanceParser : 'generic',
         balance: sameService && apiKey === existing.apiKey ? existing.balance : normalizeBalance(null),
         createdAt: existing?.createdAt || Date.now(),
         updatedAt: Date.now(),
@@ -339,8 +239,6 @@ function fillForm(account) {
         const input = $(selector);
         if (input) input.value = value;
     }
-    const preset = $('#sam-preset');
-    if (preset) preset.value = account.provider !== 'custom' && PRESETS[account.provider] ? account.provider : '';
     formModels = [...account.models];
     populateModelSelect(formModels, account.selectedModel);
     renderModelChips(formModels);
@@ -395,36 +293,6 @@ function renderModelChips(models) {
     }
 }
 
-function extractErrorMessage(payload, fallback) {
-    if (!payload) return fallback;
-    if (typeof payload === 'string') return payload.slice(0, 240) || fallback;
-    if (typeof payload === 'object') {
-        const candidates = [payload.error?.message, payload.message, payload.error, payload.detail];
-        const message = candidates.find(value => typeof value === 'string' && value.trim());
-        if (message) return message.slice(0, 240);
-    }
-    return fallback;
-}
-
-async function requestJson(url, apiKey) {
-    if (!isHttpUrl(url)) throw new Error('URL 必须以 http:// 或 https:// 开头');
-    const headers = { Accept: 'application/json' };
-    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
-    let response;
-    try {
-        response = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
-    } catch (error) {
-        throw new Error(`网络请求失败（可能被 CORS 拦截）：${error?.message || '无法连接'}`);
-    }
-    const text = await response.text();
-    let payload = null;
-    try { payload = text ? JSON.parse(text) : null; } catch { payload = text; }
-    if (!response.ok) {
-        throw new Error(`${response.status} ${response.statusText || ''} ${extractErrorMessage(payload, '')}`.trim().slice(0, 300));
-    }
-    return payload;
-}
-
 function extractModels(payload) {
     const candidates = [];
     if (Array.isArray(payload)) candidates.push(payload);
@@ -450,92 +318,15 @@ function extractModels(payload) {
     return [...new Set(result)].sort((a, b) => a.localeCompare(b));
 }
 
-function getPath(payload, path) {
-    if (!path) return undefined;
-    const parts = path.replace(/^\.+|\.+$/g, '').split('.').filter(Boolean);
-    let current = payload;
-    for (const part of parts) {
-        if (current == null) return undefined;
-        if (/^\d+$/.test(part) && Array.isArray(current)) current = current[Number(part)];
-        else if (typeof current === 'object') current = current[part];
-        else return undefined;
-    }
-    return current;
-}
-
-function numericValue(value) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string') {
-        const cleaned = value.replace(/[$,\s]/g, '');
-        if (cleaned && Number.isFinite(Number(cleaned))) return Number(cleaned);
-    }
-    return null;
-}
-
-function findNumericByKeys(payload, keys, depth = 0) {
-    if (depth > 5 || payload == null || typeof payload !== 'object') return null;
-    if (Array.isArray(payload)) {
-        for (const item of payload) {
-            const found = findNumericByKeys(item, keys, depth + 1);
-            if (found != null) return found;
-        }
-        return null;
-    }
-    for (const [key, value] of Object.entries(payload)) {
-        if (keys.includes(key.toLowerCase())) {
-            const number = numericValue(value);
-            if (number != null) return number;
-        }
-    }
-    for (const value of Object.values(payload)) {
-        const found = findNumericByKeys(value, keys, depth + 1);
-        if (found != null) return found;
-    }
-    return null;
-}
-
-function parseBalance(payload, account) {
-    const explicit = getPath(payload, account.balancePath);
-    let value = numericValue(explicit);
-    const parser = account.balanceParser || 'generic';
-    if (parser === 'openrouter' && payload?.data) {
-        const total = numericValue(payload.data.total_credits);
-        const used = numericValue(payload.data.total_usage);
-        if (total != null) value = used == null ? total : total - used;
-    }
-    if (parser === 'deepseek' && value == null) {
-        value = findNumericByKeys(payload, ['total_balance', 'balance', 'remaining_balance']);
-    }
-    if (parser === 'siliconflow' && value == null) {
-        value = findNumericByKeys(payload, ['balance', 'available_balance', 'remaining']);
-    }
-    if (value == null) {
-        value = findNumericByKeys(payload, ['balance', 'remaining', 'credits', 'available', 'amount', 'total_balance']);
-    }
-    if (value == null) return null;
-    const currency = account.balanceCurrency
-        || asString(getPath(payload, 'currency'))
-        || asString(getPath(payload, 'data.currency'));
-    return { value, currency };
-}
-
-function balanceUrlFor(account) {
-    if (account.balanceUrl) return account.balanceUrl;
-    const preset = getPreset(account.provider);
-    if (preset.balanceUrl) return preset.balanceUrl;
-    return '';
-}
-
 async function fetchModelsForDraft() {
     if (isLoadingModels) return;
     const baseUrl = normalizeUrl($('#sam-base-url')?.value);
-    const apiKey = asString($('#sam-api-key')?.value) || settings.accounts.find(account => account.id === $('#sam-account-id')?.value)?.apiKey || '';
-    const preset = getPreset(asString($('#sam-preset')?.value));
+    const apiKey = asString($('#sam-api-key')?.value).trim() || settings.accounts.find(account => account.id === $('#sam-account-id')?.value)?.apiKey || '';
     if (!baseUrl || !isHttpUrl(baseUrl)) {
         notify('请先填写有效的 API 基础地址。', 'error');
         return;
     }
-    const url = joinUrl(baseUrl, preset.modelPath || '/models');
+    const url = joinUrl(baseUrl, '/models');
     isLoadingModels = true;
     const button = $('#sam-fetch-models');
     if (button) { button.disabled = true; button.textContent = '获取中…'; }
@@ -557,31 +348,47 @@ async function fetchModelsForDraft() {
 }
 
 async function refreshBalance(account, options = {}) {
-    const url = balanceUrlFor(account);
-    if (!url) {
-        account.balance = { status: 'unsupported', value: null, currency: account.balanceCurrency, message: '暂不支持余额查询', fetchedAt: Date.now() };
-        account.updatedAt = Date.now();
-        persist();
-        renderAccounts();
-        return account.balance;
+    const snapshot = { ...account };
+    const active = activeBalanceQueries.get(snapshot.id);
+    if (active && active.snapshot.baseUrl === snapshot.baseUrl && active.snapshot.apiKey === snapshot.apiKey) {
+        return active.promise;
     }
-    account.balance = { ...normalizeBalance(account.balance), status: 'loading', message: '', currency: account.balanceCurrency };
+    const query = { snapshot, promise: null };
+    const currentAccount = () => activeBalanceQueries.get(snapshot.id) === query
+        ? settings.accounts.find(item => item.id === snapshot.id
+            && item.baseUrl === snapshot.baseUrl && item.apiKey === snapshot.apiKey)
+        : undefined;
+    // Register the promise before starting work, so a replacement connection
+    // cannot reuse or be overwritten by an older request for the same account.
+    query.promise = Promise.resolve().then(async () => {
+        try {
+            const result = await queryBalance(snapshot);
+            const current = currentAccount();
+            if (!current) return null;
+            current.balance = normalizeBalance({ ...result, status: 'ok', fetchedAt: Date.now() });
+            current.updatedAt = Date.now();
+            persist();
+            if (!options.silent) notify(`${current.name} 的余额信息已更新。`, 'success');
+            return current.balance;
+        } catch (error) {
+            const current = currentAccount();
+            if (!current) return null;
+            current.balance = normalizeBalance({ status: error?.unsupported ? 'unsupported' : 'error', value: null,
+                message: error?.message || '查询失败', fetchedAt: Date.now() });
+            persist();
+            if (!options.silent) notify(`${current.name}：${current.balance.message}`, 'error');
+            return current.balance;
+        } finally {
+            if (activeBalanceQueries.get(snapshot.id) === query) {
+                activeBalanceQueries.delete(snapshot.id);
+                renderAccounts();
+            }
+        }
+    });
+    activeBalanceQueries.set(snapshot.id, query);
+    account.balance = { ...normalizeBalance(account.balance), status: 'loading', message: '' };
     renderAccounts();
-    try {
-        const payload = await requestJson(url, account.apiKey);
-        const parsed = parseBalance(payload, account);
-        if (!parsed) throw new Error('当前服务商的余额返回格式暂不支持');
-        account.balance = { status: 'ok', value: parsed.value, currency: parsed.currency || account.balanceCurrency, message: '', fetchedAt: Date.now() };
-        account.updatedAt = Date.now();
-        persist();
-        if (!options.silent) notify(`${account.name} 余额已更新。`, 'success');
-    } catch (error) {
-        account.balance = { status: 'error', value: null, currency: account.balanceCurrency, message: error?.message || '查询失败', fetchedAt: Date.now() };
-        persist();
-        if (!options.silent) notify(`${account.name}：${account.balance.message}`, 'error');
-    }
-    renderAccounts();
-    return account.balance;
+    return query.promise;
 }
 
 async function refreshAllBalances(options = {}) {
@@ -600,12 +407,13 @@ async function refreshAllBalances(options = {}) {
 
 function formatBalance(balance) {
     if (!balance) return '余额：未查询';
-    if (balance.status === 'loading') return '余额：查询中…';
-    if (balance.status === 'unsupported') return '余额：暂不支持查询';
+    const label = balance.kind === 'available' ? '可用额度' : ['token', 'quota'].includes(balance.kind) ? '密钥额度' : '余额';
+    if (balance.status === 'loading') return `${label}：查询中…`;
+    if (balance.status === 'unsupported') return `余额：${balance.message || '服务商暂未开放查询接口'}`;
     if (balance.status === 'error') return `余额：查询失败（${balance.message || '未知错误'}）`;
     if (balance.status !== 'ok' || balance.value == null) return '余额：未查询';
     const value = typeof balance.value === 'number' ? balance.value.toLocaleString(undefined, { maximumFractionDigits: 8 }) : String(balance.value);
-    return `余额：${value}${balance.currency ? ` ${balance.currency}` : ''}`;
+    return `${label}：${value}${balance.currency ? ` ${balance.currency}` : ''}${balance.message ? `（${balance.message}）` : ''}`;
 }
 
 function formatTime(timestamp) {
@@ -642,17 +450,7 @@ function createAccountCard(account) {
     title.className = 'sam-account-name';
     title.textContent = account.name;
     titleWrap.append(title);
-    if (account.group) {
-        const group = document.createElement('div');
-        group.className = 'sam-account-group';
-        group.textContent = account.group;
-        titleWrap.append(group);
-    }
     main.append(titleWrap);
-    const provider = document.createElement('span');
-    provider.className = 'sam-account-time';
-    provider.textContent = PRESETS[account.provider]?.label || '自定义';
-    main.append(provider);
     item.append(main);
 
     const url = document.createElement('div');
@@ -692,7 +490,7 @@ function createAccountCard(account) {
     const actionDefinitions = [
         ['edit', '编辑', '编辑账户'],
         ['models', '模型', '刷新模型列表'],
-        ['apply', '应用', '应用到酒馆当前连接'],
+        ['apply', '应用', '应用并连接此 API'],
         ['delete', '删除', '删除账户'],
     ];
     for (const [action, label, titleText] of actionDefinitions) {
@@ -703,29 +501,15 @@ function createAccountCard(account) {
         button.dataset.accountId = account.id;
         button.title = titleText;
         button.textContent = label;
+        if (action === 'apply') button.disabled = isApplyingAccount;
         actions.append(button);
     }
     item.append(actions);
     return item;
 }
 
-function renderGroupFilter() {
-    const select = $('#sam-filter-group');
-    if (!select) return;
-    const selected = select.value;
+function renderGroupSuggestions() {
     const groups = [...new Set(settings.accounts.map(account => account.group).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    select.replaceChildren();
-    const all = document.createElement('option');
-    all.value = '';
-    all.textContent = '全部分组';
-    select.append(all);
-    for (const group of groups) {
-        const option = document.createElement('option');
-        option.value = group;
-        option.textContent = group;
-        select.append(option);
-    }
-    select.value = groups.includes(selected) ? selected : '';
     const suggestions = $('#sam-group-options');
     if (suggestions) {
         suggestions.replaceChildren(...groups.map(group => {
@@ -737,24 +521,68 @@ function renderGroupFilter() {
 }
 
 function renderAccounts() {
-    renderGroupFilter();
+    renderGroupSuggestions();
     updateFormBalance();
     if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
     const list = $('#sam-account-list');
     if (!list) return;
-    const filter = asString($('#sam-filter-group')?.value);
-    const accounts = settings.accounts
-        .filter(account => !filter || account.group === filter)
+    const openStates = new Map($$('.sam-group-section', list).map(section => [section.dataset.group, section.open]));
+    const currentGroups = new Set(settings.accounts.map(account => account.group));
+    const expandedGroups = settings.expandedGroups.filter(group => currentGroups.has(group)
+        && (!openStates.has(group) || openStates.get(group)));
+    for (const [group, open] of openStates) {
+        if (open && currentGroups.has(group) && !expandedGroups.includes(group)) expandedGroups.push(group);
+    }
+    if (expandedGroups.length !== settings.expandedGroups.length
+        || expandedGroups.some(group => !settings.expandedGroups.includes(group))) {
+        settings.expandedGroups = expandedGroups;
+        persist();
+    }
+    const accounts = [...settings.accounts]
         .sort((a, b) => (a.group || '未分组').localeCompare(b.group || '未分组') || a.name.localeCompare(b.name));
     list.replaceChildren();
     if (!accounts.length) {
         const empty = document.createElement('div');
         empty.className = 'sam-empty';
-        empty.textContent = settings.accounts.length ? '该分组暂无账户。' : '还没有保存的 API，在下方填写信息即可添加。';
+        empty.textContent = '还没有保存的 API，在下方填写信息即可添加。';
         list.append(empty);
         return;
     }
-    for (const account of accounts) list.append(createAccountCard(account));
+    const groups = new Map();
+    for (const account of accounts) {
+        if (!groups.has(account.group)) groups.set(account.group, []);
+        groups.get(account.group).push(account);
+    }
+    for (const [group, members] of groups) {
+        const section = document.createElement('details');
+        section.className = 'sam-group-section';
+        section.dataset.group = group;
+        section.open = openStates.has(group) ? openStates.get(group) : settings.expandedGroups.includes(group);
+        const summary = document.createElement('summary');
+        summary.className = 'sam-group-header';
+        const title = document.createElement('span');
+        title.className = 'sam-group-title';
+        title.textContent = group || '未分组';
+        const count = document.createElement('span');
+        count.className = 'sam-group-count';
+        count.textContent = `${members.length} 个 API`;
+        summary.append(title, count);
+        const body = document.createElement('div');
+        body.className = 'sam-group-accounts';
+        body.setAttribute('role', 'list');
+        body.setAttribute('aria-label', `${group || '未分组'}的 API`);
+        body.append(...members.map(createAccountCard));
+        section.append(summary, body);
+        section.addEventListener('toggle', () => {
+            if (!section.isConnected) return;
+            const savedOpen = settings.expandedGroups.includes(group);
+            if (savedOpen === section.open) return;
+            settings.expandedGroups = settings.expandedGroups.filter(name => name !== group);
+            if (section.open) settings.expandedGroups.push(group);
+            persist();
+        });
+        list.append(section);
+    }
 }
 
 function saveAccountFromForm(event) {
@@ -813,28 +641,69 @@ function setConnectionValue(selectors, value) {
     return true;
 }
 
-function applyToSillyTavern(account) {
+async function applyToSillyTavern(account) {
+    if (isApplyingAccount) return;
+    const apiKey = asString(account.apiKey).trim();
+    if (!apiKey) return notify('请先填写并保存有效的 API Key。', 'error');
     const main = document.querySelector('#main_api');
     const source = document.querySelector('#chat_completion_source');
+    const modelSelect = document.querySelector('#model_custom_select');
+    const connect = document.querySelector('#api_button_openai');
     const controls = ['#custom_api_url_text', '#api_key_custom', '#custom_model_id'];
-    if (!main || !source || controls.some(selector => !document.querySelector(selector))
+    if (!main || !source || !modelSelect || !connect || controls.some(selector => !document.querySelector(selector))
         || ![...main.options].some(option => option.value === 'openai')
         || ![...source.options].some(option => option.value === 'custom')) {
         notify('当前酒馆缺少自定义聊天补全控件，请检查酒馆版本。', 'error');
         return;
     }
-    // Fill the complete connection before source changes can trigger a reconnect.
-    const mainChanged = main.value !== 'openai';
-    const sourceChanged = source.value !== 'custom';
-    main.value = 'openai';
-    source.value = 'custom';
-    setConnectionValue(['#custom_api_url_text'], account.baseUrl);
-    setConnectionValue(['#api_key_custom'], account.apiKey);
-    setConnectionValue(['#custom_model_id'], account.selectedModel || '');
-    if (sourceChanged) source.dispatchEvent(new Event('change', { bubbles: true }));
-    if (mainChanged) main.dispatchEvent(new Event('change', { bubbles: true }));
-    if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-    notify('已填入下方的自定义连接设置，请点击酒馆“连接”。', 'success');
+    isApplyingAccount = true;
+    renderAccounts();
+    const jq = globalThis.jQuery;
+    let connectionStarted = false;
+    let connectionResult;
+    const trackConnection = event => {
+        connectionStarted = true;
+        if (event.result?.then) connectionResult = event.result;
+    };
+    if (jq) jq(connect).on('click.samAccountApply', trackConnection);
+    else connect.addEventListener('click', trackConnection);
+    try {
+        // Source changes can reconnect and restore the old model selection.
+        // Fill all controls, including the native model selector, beforehand.
+        const mainChanged = main.value !== 'openai';
+        const sourceChanged = source.value !== 'custom';
+        const model = account.selectedModel || '';
+        if (model && ![...modelSelect.options].some(option => option.value === model)) {
+            const option = document.createElement('option');
+            option.value = model;
+            option.textContent = model;
+            modelSelect.append(option);
+        }
+        modelSelect.value = model;
+        main.value = 'openai';
+        source.value = 'custom';
+        setConnectionValue(['#custom_api_url_text'], account.baseUrl);
+        setConnectionValue(['#api_key_custom'], apiKey);
+        setConnectionValue(['#custom_model_id'], model);
+        notify('已应用，正在连接…');
+        if (sourceChanged) source.dispatchEvent(new Event('change', { bubbles: true }));
+        if (mainChanged) main.dispatchEvent(new Event('change', { bubbles: true }));
+        // SillyTavern already connects when its source changes. Reuse that
+        // click; otherwise trigger its handler, which saves the key first.
+        if (!connectionStarted) {
+            if (jq) connectionResult = jq(connect).triggerHandler('click');
+            else connect.click();
+        }
+        if (connectionResult?.then) await connectionResult;
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+    } catch (error) {
+        notify(error?.message || '连接未能启动，请检查酒馆连接状态。', 'error');
+    } finally {
+        if (jq) jq(connect).off('click.samAccountApply', trackConnection);
+        else connect.removeEventListener('click', trackConnection);
+        isApplyingAccount = false;
+        renderAccounts();
+    }
 }
 
 async function handleAccountAction(event) {
@@ -859,7 +728,7 @@ async function handleAccountAction(event) {
             }
             break;
         case 'balance': await refreshBalance(account); break;
-        case 'apply': applyToSillyTavern(account); break;
+        case 'apply': await applyToSillyTavern(account); break;
         default: break;
     }
 }
@@ -879,7 +748,6 @@ function bindEvents() {
     const form = $('#sam-account-form');
     form?.addEventListener('submit', saveAccountFromForm);
     $('#sam-cancel-edit')?.addEventListener('click', clearForm);
-    $('#sam-preset')?.addEventListener('change', event => applyPreset(event.target.value));
     $('#sam-fetch-models')?.addEventListener('click', fetchModelsForDraft);
     $('#sam-fetch-balance')?.addEventListener('click', async () => {
         const id = asString($('#sam-account-id')?.value);
@@ -902,7 +770,6 @@ function bindEvents() {
         updateFormBalance();
     });
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
-    $('#sam-filter-group')?.addEventListener('change', renderAccounts);
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
     $('#sam-auto-refresh')?.addEventListener('change', event => {
         settings.autoRefresh = Boolean(event.target.checked);
@@ -940,8 +807,9 @@ function loadSettingsIntoUi() {
 
 async function loadPanel() {
     const host = document.querySelector('#openai_api');
-    const source = host?.querySelector('#chat_completion_source');
-    if (!source) return false;
+    const modelSelect = host?.querySelector('#model_custom_select');
+    const modelForm = modelSelect?.closest('form');
+    if (!modelForm || modelForm.id !== 'custom_form' || modelForm.parentElement !== host) return false;
     try {
         let panel = rootElement();
         if (!panel) {
@@ -954,7 +822,9 @@ async function loadPanel() {
             panel = template.content.querySelector(`#${SETTINGS_ROOT_ID}`);
             if (!panel) throw new Error('API 账户面板缺少根节点');
         }
-        source.after(panel);
+        // Available Models is the last field of the native custom form.
+        // Insert outside it so the account form is never nested in another form.
+        modelForm.after(panel);
         const styleUrl = new URL('./style.css', import.meta.url);
         styleUrl.searchParams.set('v', EXTENSION_VERSION);
         const styleHref = styleUrl.href;
@@ -981,7 +851,6 @@ async function init() {
         setTimeout(() => init(), 500);
         return;
     }
-    populatePresets();
     bindEvents();
     loadSettingsIntoUi();
     restartRefreshTimer();
