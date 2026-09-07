@@ -7,19 +7,20 @@
  */
 
 import { extension_settings } from '../../../extensions.js';
-import { saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.2.0';
+import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.3.0';
+import { displayApiUrl, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.3.0';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.2.0';
+const EXTENSION_VERSION = '1.3.0';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
-const SETTINGS_VERSION = 1;
+const SETTINGS_VERSION = 2;
 
 const DEFAULT_SETTINGS = Object.freeze({
     version: SETTINGS_VERSION,
     accounts: [],
     selectedAccountId: '',
-    expandedGroups: [],
+    accountFilter: { type: 'all' },
     autoRefresh: true,
     refreshInterval: 30,
 });
@@ -27,6 +28,8 @@ const DEFAULT_SETTINGS = Object.freeze({
 let settings;
 let refreshTimer = null;
 let formModels = [];
+let formResolvedConnection = null;
+let formConnectionRevision = 0;
 let isLoadingModels = false;
 let isLoadingBalance = false;
 let isApplyingAccount = false;
@@ -57,33 +60,36 @@ function normalizeUrl(value) {
 function isHttpUrl(value) {
     try {
         const url = new URL(value);
-        return url.protocol === 'http:' || url.protocol === 'https:';
+        return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password;
     } catch {
         return false;
     }
 }
 
-function joinUrl(base, path) {
-    const cleanBase = normalizeUrl(base);
-    const cleanPath = asString(path).trim();
-    if (!cleanPath) return cleanBase;
-    if (/^https?:\/\//i.test(cleanPath)) return cleanPath;
-    if (!cleanBase) return cleanPath;
-    return `${cleanBase}/${cleanPath.replace(/^\/+/, '')}`;
-}
-
 function normalizeBalance(balance) {
-    if (!balance || typeof balance !== 'object') {
-        return { status: 'unknown', value: null, currency: '', message: '', fetchedAt: 0 };
+    const empty = { status: 'unknown', value: null, currency: '', kind: 'balance', scope: '', message: '', fetchedAt: 0 };
+    if (!balance || typeof balance !== 'object') return empty;
+    if (balance.status === 'ok' && (balance.scope !== 'account'
+        || (balance.kind && balance.kind !== 'balance')
+        || typeof balance.value !== 'number' || !Number.isFinite(balance.value))) {
+        // Old versions cached key quotas and ambiguous billing amounts. They
+        // cannot be relabelled as an account's total balance during migration.
+        return empty;
     }
     return {
         status: ['ok', 'loading', 'error', 'unsupported', 'unknown'].includes(balance.status) ? balance.status : 'unknown',
         value: balance.value == null ? null : balance.value,
         currency: asString(balance.currency),
-        kind: ['balance', 'available', 'token', 'quota'].includes(balance.kind) ? balance.kind : 'balance',
+        kind: 'balance',
+        scope: balance.scope === 'account' ? 'account' : '',
         message: asString(balance.message),
         fetchedAt: Number.isFinite(Number(balance.fetchedAt)) ? Number(balance.fetchedAt) : 0,
     };
+}
+
+function savedApiEndpoint(account) {
+    const resolved = normalizeUrl(account?.resolvedBaseUrl);
+    return isHttpUrl(resolved) && displayApiUrl(resolved) === displayApiUrl(account?.baseUrl) ? resolved : '';
 }
 
 function normalizeAccount(account) {
@@ -94,12 +100,16 @@ function normalizeAccount(account) {
     const uniqueModels = [...new Set(models)];
     const selectedModel = asString(source.selectedModel ?? source.model).trim();
     if (selectedModel && !uniqueModels.includes(selectedModel)) uniqueModels.unshift(selectedModel);
+    const rawBaseUrl = normalizeUrl(source.baseUrl);
+    const baseUrl = displayApiUrl(rawBaseUrl);
     return {
         id: asString(source.id) || makeId(),
         name: asString(source.name).trim() || '未命名账户',
         group: asString(source.group).trim(),
+        favorite: source.favorite === true,
         provider: asString(source.provider),
-        baseUrl: normalizeUrl(source.baseUrl),
+        baseUrl,
+        resolvedBaseUrl: savedApiEndpoint({ baseUrl, resolvedBaseUrl: source.resolvedBaseUrl }),
         apiKey: asString(source.apiKey).trim(),
         models: uniqueModels,
         selectedModel,
@@ -113,6 +123,15 @@ function normalizeAccount(account) {
     };
 }
 
+function normalizeAccountFilter(filter, accounts) {
+    if (filter?.type === 'favorites') return { type: 'favorites' };
+    if (filter?.type === 'group' && typeof filter.group === 'string'
+        && accounts.some(account => account.group === filter.group)) {
+        return { type: 'group', group: filter.group };
+    }
+    return { type: 'all' };
+}
+
 function normalizeSettings(raw) {
     const source = raw && typeof raw === 'object' ? raw : {};
     const accounts = Array.isArray(source.accounts) ? source.accounts.map(normalizeAccount) : [];
@@ -122,14 +141,14 @@ function normalizeSettings(raw) {
         if (account.balance.status === 'loading') account.balance.status = 'unknown';
     }
     const selected = asString(source.selectedAccountId);
+    const { expandedGroups, ...retained } = source;
     return {
         ...DEFAULT_SETTINGS,
-        ...source,
+        ...retained,
         version: SETTINGS_VERSION,
         accounts,
         selectedAccountId: accounts.some(account => account.id === selected) ? selected : '',
-        expandedGroups: Array.isArray(source.expandedGroups)
-            ? [...new Set(source.expandedGroups.filter(group => typeof group === 'string'))] : [],
+        accountFilter: normalizeAccountFilter(source.accountFilter, accounts),
         autoRefresh: source.autoRefresh !== false,
         refreshInterval: clampInteger(source.refreshInterval, 1, 1440, DEFAULT_SETTINGS.refreshInterval),
     };
@@ -165,21 +184,27 @@ function readForm() {
     const existing = settings.accounts.find(account => account.id === accountId);
     const enteredKey = asString($('#sam-api-key')?.value).trim();
     const apiKey = enteredKey || existing?.apiKey || '';
-    const baseUrl = normalizeUrl($('#sam-base-url')?.value);
+    const enteredUrl = normalizeUrl($('#sam-base-url')?.value);
+    const baseUrl = displayApiUrl(enteredUrl);
     // Keep saved balance support when only the account name or group changes.
-    const sameService = existing && normalizeUrl(existing.baseUrl) === baseUrl;
+    const sameService = existing && displayApiUrl(existing.baseUrl) === baseUrl;
+    const sameConnection = sameService && apiKey === existing.apiKey;
+    const resolvedBaseUrl = formResolvedConnection?.baseUrl === baseUrl && formResolvedConnection.apiKey === apiKey
+        ? formResolvedConnection.resolvedBaseUrl : sameConnection ? savedApiEndpoint(existing) : '';
     const selectedModel = asString($('#sam-model-select')?.value).trim();
     const models = [...new Set([
         ...formModels,
-        ...(existing?.models || []),
+        ...(sameConnection ? existing.models : []),
         selectedModel,
     ].map(item => asString(item).trim()).filter(Boolean))];
     return {
         id: accountId || makeId(),
         name: asString($('#sam-name')?.value).trim(),
         group: asString($('#sam-group')?.value).trim(),
+        favorite: existing?.favorite === true,
         provider: identifyProvider(baseUrl),
         baseUrl,
+        resolvedBaseUrl,
         apiKey,
         models,
         selectedModel,
@@ -187,13 +212,15 @@ function readForm() {
         balancePath: sameService ? existing.balancePath : '',
         balanceCurrency: sameService ? existing.balanceCurrency : '',
         balanceParser: sameService ? existing.balanceParser : 'generic',
-        balance: sameService && apiKey === existing.apiKey ? existing.balance : normalizeBalance(null),
+        balance: sameConnection ? existing.balance : normalizeBalance(null),
         createdAt: existing?.createdAt || Date.now(),
         updatedAt: Date.now(),
     };
 }
 
 function clearForm() {
+    formConnectionRevision++;
+    formResolvedConnection = null;
     const form = $('#sam-account-form');
     if (form) form.reset();
     const accountId = $('#sam-account-id');
@@ -205,14 +232,6 @@ function clearForm() {
         option.value = '';
         option.textContent = '请先获取模型';
         modelSelect.append(option);
-    }
-    const modelList = $('#sam-models');
-    if (modelList) {
-        modelList.replaceChildren();
-        const muted = document.createElement('span');
-        muted.className = 'sam-muted';
-        muted.textContent = '尚未获取模型列表。';
-        modelList.append(muted);
     }
     formModels = [];
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = true;
@@ -228,11 +247,13 @@ function clearForm() {
 
 function fillForm(account) {
     if (!account) return;
+    formConnectionRevision++;
+    formResolvedConnection = null;
     const values = {
         '#sam-account-id': account.id,
         '#sam-name': account.name,
         '#sam-group': account.group,
-        '#sam-base-url': account.baseUrl,
+        '#sam-base-url': displayApiUrl(account.baseUrl),
         '#sam-api-key': '',
     };
     for (const [selector, value] of Object.entries(values)) {
@@ -241,7 +262,6 @@ function fillForm(account) {
     }
     formModels = [...account.models];
     populateModelSelect(formModels, account.selectedModel);
-    renderModelChips(formModels);
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = false;
     if ($('#sam-save-account')) $('#sam-save-account').textContent = '更新 API';
     if ($('#sam-form-title')) $('#sam-form-title').textContent = '编辑 API';
@@ -274,73 +294,50 @@ function populateModelSelect(models, selected = '') {
     if (selected && !models.includes(selected)) select.value = models[0];
 }
 
-function renderModelChips(models) {
-    const list = $('#sam-models');
-    if (!list) return;
-    list.replaceChildren();
-    if (!models.length) {
-        const muted = document.createElement('span');
-        muted.className = 'sam-muted';
-        muted.textContent = '尚未获取模型列表。';
-        list.append(muted);
-        return;
-    }
-    for (const model of models) {
-        const chip = document.createElement('span');
-        chip.className = 'sam-model-chip';
-        chip.textContent = model;
-        list.append(chip);
-    }
+function resolveAccountEndpoint(account) {
+    return resolveApiEndpoint(account, {
+        request: requestJson,
+        nativeRequest: (baseUrl, apiKey) => requestNativeModels(baseUrl, apiKey, { getRequestHeaders }),
+    });
 }
 
-function extractModels(payload) {
-    const candidates = [];
-    if (Array.isArray(payload)) candidates.push(payload);
-    if (payload && typeof payload === 'object') {
-        for (const key of ['data', 'models', 'result', 'items']) {
-            if (Array.isArray(payload[key])) candidates.push(payload[key]);
-        }
-    }
-    if (!candidates.length && payload && typeof payload === 'object') {
-        // A few providers return { model_name: metadata } rather than an array.
-        const mapKeys = Object.keys(payload).filter(key => !['object', 'success', 'code', 'message'].includes(key));
-        if (mapKeys.length && mapKeys.every(key => typeof payload[key] === 'object' || typeof payload[key] === 'string')) {
-            candidates.push(mapKeys.map(key => ({ id: key })));
-        }
-    }
-    const result = [];
-    for (const list of candidates) {
-        for (const item of list) {
-            const value = typeof item === 'string' ? item : item?.id ?? item?.name ?? item?.model ?? item?.model_name;
-            if (typeof value === 'string' && value.trim()) result.push(value.trim());
-        }
-    }
-    return [...new Set(result)].sort((a, b) => a.localeCompare(b));
+function invalidateDraftConnection() {
+    formConnectionRevision++;
+    formResolvedConnection = null;
+    formModels = [];
+    populateModelSelect([]);
 }
 
 async function fetchModelsForDraft() {
     if (isLoadingModels) return;
-    const baseUrl = normalizeUrl($('#sam-base-url')?.value);
-    const apiKey = asString($('#sam-api-key')?.value).trim() || settings.accounts.find(account => account.id === $('#sam-account-id')?.value)?.apiKey || '';
-    if (!baseUrl || !isHttpUrl(baseUrl)) {
+    const draft = readForm();
+    if (!draft.baseUrl || !isHttpUrl(draft.baseUrl)) {
         notify('请先填写有效的 API 基础地址。', 'error');
         return;
     }
-    const url = joinUrl(baseUrl, '/models');
+    if (!draft.apiKey) return notify('请先填写有效的 API Key。', 'error');
+    const revision = formConnectionRevision;
+    const stillCurrent = () => {
+        if (revision !== formConnectionRevision) return false;
+        const current = readForm();
+        return current.baseUrl === draft.baseUrl && current.apiKey === draft.apiKey;
+    };
     isLoadingModels = true;
     const button = $('#sam-fetch-models');
     if (button) { button.disabled = true; button.textContent = '获取中…'; }
     setStatus('正在获取模型…');
     try {
-        const payload = await requestJson(url, apiKey);
-        const models = extractModels(payload);
-        if (!models.length) throw new Error('接口返回中没有找到模型列表');
+        const result = await resolveAccountEndpoint(draft);
+        if (!stillCurrent()) return;
+        const { models } = result;
+        const baseUrl = displayApiUrl(result.baseUrl);
+        formResolvedConnection = { baseUrl, apiKey: draft.apiKey, resolvedBaseUrl: result.baseUrl };
+        if ($('#sam-base-url')) $('#sam-base-url').value = baseUrl;
         formModels = models;
         populateModelSelect(models, $('#sam-model-select')?.value || models[0]);
-        renderModelChips(models);
         notify(`已获取 ${models.length} 个模型。`, 'success');
     } catch (error) {
-        notify(error?.message || '获取模型失败。', 'error');
+        if (stillCurrent()) notify(error?.message || '获取模型失败。', 'error');
     } finally {
         isLoadingModels = false;
         if (button) { button.disabled = false; button.textContent = '获取模型'; }
@@ -406,14 +403,14 @@ async function refreshAllBalances(options = {}) {
 }
 
 function formatBalance(balance) {
-    if (!balance) return '余额：未查询';
-    const label = balance.kind === 'available' ? '可用额度' : ['token', 'quota'].includes(balance.kind) ? '密钥额度' : '余额';
-    if (balance.status === 'loading') return `${label}：查询中…`;
-    if (balance.status === 'unsupported') return `余额：${balance.message || '服务商暂未开放查询接口'}`;
-    if (balance.status === 'error') return `余额：查询失败（${balance.message || '未知错误'}）`;
-    if (balance.status !== 'ok' || balance.value == null) return '余额：未查询';
-    const value = typeof balance.value === 'number' ? balance.value.toLocaleString(undefined, { maximumFractionDigits: 8 }) : String(balance.value);
-    return `${label}：${value}${balance.currency ? ` ${balance.currency}` : ''}${balance.message ? `（${balance.message}）` : ''}`;
+    const label = '账户余额';
+    if (balance?.status === 'loading') return `${label}：查询中…`;
+    if (balance?.status === 'unsupported') return `${label}：${balance.message || '站点未开放查询接口'}`;
+    if (balance?.status === 'error') return `${label}：查询失败（${balance.message || '未知错误'}）`;
+    if (balance?.status !== 'ok' || balance.scope !== 'account'
+        || typeof balance.value !== 'number' || !Number.isFinite(balance.value)) return `${label}：未查询`;
+    const value = balance.value.toLocaleString(undefined, { maximumFractionDigits: 8 });
+    return `${label}：${value}${balance.currency ? ` ${balance.currency}` : ''}`;
 }
 
 function formatTime(timestamp) {
@@ -425,7 +422,7 @@ function updateFormBalance() {
     const account = settings.accounts.find(item => item.id === $('#sam-account-id')?.value);
     const output = $('#sam-form-balance');
     if (output) {
-        output.textContent = account ? formatBalance(account.balance) : '余额：保存后可查询';
+        output.textContent = account ? formatBalance(account.balance) : '账户余额：保存后可查询';
         output.dataset.state = account?.balance?.status || 'unknown';
     }
     const button = $('#sam-fetch-balance');
@@ -441,6 +438,7 @@ function createAccountCard(account) {
     item.setAttribute('role', 'listitem');
     item.dataset.accountId = account.id;
     if (account.id === settings.selectedAccountId) item.classList.add('sam-selected');
+    if (account.favorite) item.classList.add('sam-favorite');
 
     const main = document.createElement('div');
     main.className = 'sam-account-main';
@@ -450,18 +448,27 @@ function createAccountCard(account) {
     title.className = 'sam-account-name';
     title.textContent = account.name;
     titleWrap.append(title);
-    main.append(titleWrap);
+    const group = document.createElement('div');
+    group.className = 'sam-account-group';
+    group.textContent = account.group || '未分组';
+    titleWrap.append(group);
+    const favorite = document.createElement('button');
+    favorite.type = 'button';
+    favorite.className = 'sam-favorite-button';
+    favorite.dataset.action = 'favorite';
+    favorite.dataset.accountId = account.id;
+    favorite.textContent = account.favorite ? '★' : '☆';
+    favorite.title = account.favorite ? '取消收藏' : '收藏并置顶';
+    favorite.setAttribute('aria-label', `${account.favorite ? '取消收藏' : '收藏'} ${account.name}`);
+    favorite.setAttribute('aria-pressed', String(account.favorite));
+    main.append(titleWrap, favorite);
     item.append(main);
 
     const url = document.createElement('div');
     url.className = 'sam-account-url';
-    url.title = account.baseUrl;
-    url.textContent = account.baseUrl || '未填写 API 地址';
+    url.title = displayApiUrl(account.baseUrl);
+    url.textContent = displayApiUrl(account.baseUrl) || '未填写 API 地址';
     item.append(url);
-    const model = document.createElement('div');
-    model.className = 'sam-account-model';
-    model.textContent = account.selectedModel ? `模型：${account.selectedModel}` : `模型：${account.models.length ? `${account.models.length} 个可用` : '未选择'}`;
-    item.append(model);
     const balanceRow = document.createElement('div');
     balanceRow.className = 'sam-balance-row';
     const balance = document.createElement('output');
@@ -489,7 +496,6 @@ function createAccountCard(account) {
     actions.className = 'sam-account-actions';
     const actionDefinitions = [
         ['edit', '编辑', '编辑账户'],
-        ['models', '模型', '刷新模型列表'],
         ['apply', '应用', '应用并连接此 API'],
         ['delete', '删除', '删除账户'],
     ];
@@ -520,69 +526,73 @@ function renderGroupSuggestions() {
     }
 }
 
+function filteredAccounts(accounts, filter) {
+    return accounts.filter(account => filter.type === 'favorites' ? account.favorite
+        : filter.type === 'group' ? account.group === filter.group : true)
+        .sort((a, b) => Number(b.favorite) - Number(a.favorite)
+            || (a.group || '未分组').localeCompare(b.group || '未分组')
+            || a.name.localeCompare(b.name));
+}
+
+function renderGroupTabs() {
+    const tabs = $('#sam-group-tabs');
+    if (!tabs) return;
+    const previousScroll = tabs.scrollLeft;
+    const focused = document.activeElement?.closest('.sam-group-tab');
+    const groups = [...new Set(settings.accounts.map(account => account.group))]
+        .sort((a, b) => (a || '未分组').localeCompare(b || '未分组'));
+    const filters = [
+        { type: 'favorites', label: '★ 收藏', count: settings.accounts.filter(account => account.favorite).length },
+        { type: 'all', label: '全部', count: settings.accounts.length },
+        ...groups.map(group => ({ type: 'group', group, label: group || '未分组',
+            count: settings.accounts.filter(account => account.group === group).length })),
+    ];
+    tabs.replaceChildren(...filters.map(filter => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'sam-group-tab';
+        button.dataset.filter = filter.type;
+        if (filter.type === 'group') button.dataset.group = filter.group;
+        button.textContent = `${filter.label} ${filter.count}`;
+        button.title = filter.type === 'favorites' ? '查看收藏的 API' : filter.type === 'all'
+            ? '查看全部 API' : `查看分组：${filter.label}`;
+        const selected = settings.accountFilter.type === filter.type
+            && (filter.type !== 'group' || settings.accountFilter.group === filter.group);
+        button.setAttribute('aria-pressed', String(selected));
+        return button;
+    }));
+    tabs.scrollLeft = previousScroll;
+    if (focused) {
+        const replacement = $$('.sam-group-tab', tabs).find(button => button.dataset.filter === focused.dataset.filter
+            && button.dataset.group === focused.dataset.group);
+        replacement?.focus({ preventScroll: true });
+    }
+}
+
 function renderAccounts() {
+    const validFilter = normalizeAccountFilter(settings.accountFilter, settings.accounts);
+    if (validFilter.type !== settings.accountFilter.type || validFilter.group !== settings.accountFilter.group) {
+        settings.accountFilter = validFilter;
+        persist();
+    }
     renderGroupSuggestions();
+    renderGroupTabs();
     updateFormBalance();
     if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
     const list = $('#sam-account-list');
     if (!list) return;
-    const openStates = new Map($$('.sam-group-section', list).map(section => [section.dataset.group, section.open]));
-    const currentGroups = new Set(settings.accounts.map(account => account.group));
-    const expandedGroups = settings.expandedGroups.filter(group => currentGroups.has(group)
-        && (!openStates.has(group) || openStates.get(group)));
-    for (const [group, open] of openStates) {
-        if (open && currentGroups.has(group) && !expandedGroups.includes(group)) expandedGroups.push(group);
-    }
-    if (expandedGroups.length !== settings.expandedGroups.length
-        || expandedGroups.some(group => !settings.expandedGroups.includes(group))) {
-        settings.expandedGroups = expandedGroups;
-        persist();
-    }
-    const accounts = [...settings.accounts]
-        .sort((a, b) => (a.group || '未分组').localeCompare(b.group || '未分组') || a.name.localeCompare(b.name));
+    const accounts = filteredAccounts(settings.accounts, settings.accountFilter);
     list.replaceChildren();
     if (!accounts.length) {
         const empty = document.createElement('div');
         empty.className = 'sam-empty';
-        empty.textContent = '还没有保存的 API，在下方填写信息即可添加。';
+        empty.textContent = settings.accounts.length && settings.accountFilter.type === 'favorites'
+            ? '还没有收藏的 API，点击账户右上角的星标即可置顶。'
+            : '还没有保存的 API，在下方填写信息即可添加。';
         list.append(empty);
         return;
     }
-    const groups = new Map();
-    for (const account of accounts) {
-        if (!groups.has(account.group)) groups.set(account.group, []);
-        groups.get(account.group).push(account);
-    }
-    for (const [group, members] of groups) {
-        const section = document.createElement('details');
-        section.className = 'sam-group-section';
-        section.dataset.group = group;
-        section.open = openStates.has(group) ? openStates.get(group) : settings.expandedGroups.includes(group);
-        const summary = document.createElement('summary');
-        summary.className = 'sam-group-header';
-        const title = document.createElement('span');
-        title.className = 'sam-group-title';
-        title.textContent = group || '未分组';
-        const count = document.createElement('span');
-        count.className = 'sam-group-count';
-        count.textContent = `${members.length} 个 API`;
-        summary.append(title, count);
-        const body = document.createElement('div');
-        body.className = 'sam-group-accounts';
-        body.setAttribute('role', 'list');
-        body.setAttribute('aria-label', `${group || '未分组'}的 API`);
-        body.append(...members.map(createAccountCard));
-        section.append(summary, body);
-        section.addEventListener('toggle', () => {
-            if (!section.isConnected) return;
-            const savedOpen = settings.expandedGroups.includes(group);
-            if (savedOpen === section.open) return;
-            settings.expandedGroups = settings.expandedGroups.filter(name => name !== group);
-            if (section.open) settings.expandedGroups.push(group);
-            persist();
-        });
-        list.append(section);
-    }
+    list.append(...accounts.map(createAccountCard));
 }
 
 function saveAccountFromForm(event) {
@@ -599,6 +609,10 @@ function saveAccountFromForm(event) {
     if (index >= 0) settings.accounts[index] = normalizeAccount(account);
     else settings.accounts.push(normalizeAccount(account));
     settings.selectedAccountId = account.id;
+    if ((settings.accountFilter.type === 'favorites' && !account.favorite)
+        || (settings.accountFilter.type === 'group' && settings.accountFilter.group !== account.group)) {
+        settings.accountFilter = { type: 'group', group: account.group };
+    }
     persist();
     renderAccounts();
     clearForm();
@@ -665,9 +679,25 @@ async function applyToSillyTavern(account) {
         connectionStarted = true;
         if (event.result?.then) connectionResult = event.result;
     };
-    if (jq) jq(connect).on('click.samAccountApply', trackConnection);
-    else connect.addEventListener('click', trackConnection);
     try {
+        let baseUrl = savedApiEndpoint(account);
+        if (!baseUrl) {
+            setStatus('正在识别 API 地址…');
+            const snapshot = { ...account };
+            const result = await resolveAccountEndpoint(snapshot);
+            const current = settings.accounts.find(item => item.id === snapshot.id
+                && item.baseUrl === snapshot.baseUrl && item.apiKey === snapshot.apiKey);
+            if (!current) return;
+            baseUrl = result.baseUrl;
+            current.baseUrl = displayApiUrl(baseUrl);
+            current.resolvedBaseUrl = baseUrl;
+            current.models = result.models;
+            current.selectedModel = current.selectedModel || result.models[0] || '';
+            account = current;
+            persist();
+        }
+        if (jq) jq(connect).on('click.samAccountApply', trackConnection);
+        else connect.addEventListener('click', trackConnection);
         // Source changes can reconnect and restore the old model selection.
         // Fill all controls, including the native model selector, beforehand.
         const mainChanged = main.value !== 'openai';
@@ -682,7 +712,7 @@ async function applyToSillyTavern(account) {
         modelSelect.value = model;
         main.value = 'openai';
         source.value = 'custom';
-        setConnectionValue(['#custom_api_url_text'], account.baseUrl);
+        setConnectionValue(['#custom_api_url_text'], baseUrl);
         setConnectionValue(['#api_key_custom'], apiKey);
         setConnectionValue(['#custom_model_id'], model);
         notify('已应用，正在连接…');
@@ -716,16 +746,13 @@ async function handleAccountAction(event) {
     switch (button.dataset.action) {
         case 'edit': editAccount(account); break;
         case 'delete': deleteAccount(account); break;
-        case 'models':
-            fillForm(account);
-            await fetchModelsForDraft();
-            if (formModels.length) {
-                account.models = [...formModels];
-                account.selectedModel = asString($('#sam-model-select')?.value).trim() || account.selectedModel;
-                account.updatedAt = Date.now();
-                persist();
-                renderAccounts();
-            }
+        case 'favorite':
+            account.favorite = !account.favorite;
+            account.updatedAt = Date.now();
+            persist();
+            renderAccounts();
+            ($$('.sam-favorite-button').find(item => item.dataset.accountId === account.id)
+                || $('.sam-group-tab[aria-pressed="true"]'))?.focus({ preventScroll: true });
             break;
         case 'balance': await refreshBalance(account); break;
         case 'apply': await applyToSillyTavern(account); break;
@@ -749,6 +776,12 @@ function bindEvents() {
     form?.addEventListener('submit', saveAccountFromForm);
     $('#sam-cancel-edit')?.addEventListener('click', clearForm);
     $('#sam-fetch-models')?.addEventListener('click', fetchModelsForDraft);
+    for (const selector of ['#sam-base-url', '#sam-api-key']) {
+        $(selector)?.addEventListener('input', invalidateDraftConnection);
+    }
+    $('#sam-base-url')?.addEventListener('blur', event => {
+        event.target.value = displayApiUrl(event.target.value);
+    });
     $('#sam-fetch-balance')?.addEventListener('click', async () => {
         const id = asString($('#sam-account-id')?.value);
         const account = settings.accounts.find(item => item.id === id);
@@ -760,7 +793,10 @@ function bindEvents() {
         Object.assign(account, {
             provider: draft.provider,
             baseUrl: draft.baseUrl,
+            resolvedBaseUrl: draft.resolvedBaseUrl,
             apiKey: draft.apiKey,
+            models: draft.models,
+            selectedModel: draft.selectedModel,
             balanceUrl: draft.balanceUrl,
             balancePath: draft.balancePath,
             balanceCurrency: draft.balanceCurrency,
@@ -771,6 +807,13 @@ function bindEvents() {
     });
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
+    $('#sam-group-tabs')?.addEventListener('click', event => {
+        const button = event.target.closest('button[data-filter]');
+        if (!button) return;
+        settings.accountFilter = normalizeAccountFilter({ type: button.dataset.filter, group: button.dataset.group }, settings.accounts);
+        persist();
+        renderAccounts();
+    });
     $('#sam-auto-refresh')?.addEventListener('change', event => {
         settings.autoRefresh = Boolean(event.target.checked);
         persist();
