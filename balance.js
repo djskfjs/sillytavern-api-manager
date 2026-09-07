@@ -13,6 +13,15 @@ function fail(message, details = {}) {
     return Object.assign(new Error(message), details);
 }
 
+function accountBalanceUnavailable(message = '站点未向此 API Key 提供可确认的账户总余额。') {
+    return fail(message, { accountBalanceUnavailable: true, unsupported: true });
+}
+
+function accountBalance(value, currency, message = '') {
+    if (number(value) == null || typeof currency !== 'string' || !currency.trim()) return null;
+    return { value: number(value), currency: currency.trim(), kind: 'balance', scope: 'account', ...(message ? { message } : {}) };
+}
+
 function httpUrl(value) {
     let url;
     try { url = new URL(String(value || '').trim()); } catch { throw fail('请填写有效的 API 地址。'); }
@@ -64,6 +73,8 @@ function safeError(error, apiKey) {
         unsupported: error?.unsupported === true,
         network: error?.network === true,
         proxyUnavailable: error?.proxyUnavailable === true,
+        proxyAuthRequired: error?.proxyAuthRequired === true,
+        accountBalanceUnavailable: error?.accountBalanceUnavailable === true,
         logical: error?.logical === true,
         protocol: error?.protocol === true,
     });
@@ -93,7 +104,9 @@ export async function requestApiJson(url, apiKey = '', options = {}) {
         let text;
         try {
             response = await fetchImpl(endpoint, {
-                method: 'GET', headers, cache: 'no-store', credentials: 'same-origin',
+                // Omit browser-managed credentials even for the same-origin
+                // proxy, so a WWW-Authenticate challenge cannot open HTTP login.
+                method: 'GET', headers, cache: 'no-store', credentials: 'omit',
                 redirect: 'error', signal: controller.signal,
             });
             text = await response.text();
@@ -107,10 +120,15 @@ export async function requestApiJson(url, apiKey = '', options = {}) {
                 network: true, proxyUnavailable: true,
             });
         }
+        if (proxy && response.status === 401) {
+            throw fail('代理查询未获授权（HTTP 401）。请检查 API 密钥，或请酒馆管理员检查 HTTP 访问认证与代理配置。', {
+                status: 401, proxyAuthRequired: true,
+            });
+        }
         let payload;
         try { payload = JSON.parse(text); } catch {
             if (!response.ok) throw fail(`接口请求失败（HTTP ${response.status}）。`, { status: response.status });
-            throw fail('接口返回了网页或无效 JSON，未取得余额数据。', { protocol: true });
+            throw fail('接口返回了网页或无效 JSON，未取得 API 数据。', { protocol: true });
         }
         if (!response.ok) {
             const fallback = [401, 403].includes(response.status)
@@ -133,31 +151,17 @@ export async function requestApiJson(url, apiKey = '', options = {}) {
     }
 }
 
-function atPath(payload, path) {
-    if (!path) return undefined;
-    return String(path).replace(/\[(\d+)\]/g, '.$1').replace(/^\$\./, '').split('.')
-        .reduce((value, key) => value != null && Object.prototype.hasOwnProperty.call(Object(value), key) ? value[key] : undefined, payload);
-}
-
-function parseLegacy(payload, account) {
+function parseLegacy(payload) {
+    if (responseScope(payload) !== 'account') return null;
     const data = payload?.data || payload;
-    let value = number(atPath(payload, account.balancePath));
-    let currency = String(account.balanceCurrency || data?.currency || payload?.currency || '');
-    if (value == null && account.balanceParser === 'openrouter') {
-        const total = number(data?.total_credits);
-        const used = number(data?.total_usage);
-        if (total != null && used != null) value = total - used;
-    }
-    if (value == null && Array.isArray(payload?.balance_infos)) {
-        const info = payload.balance_infos.find(item => number(item?.total_balance) != null);
-        value = number(info?.total_balance);
-        currency = String(info?.currency || currency);
-    }
-    if (value == null) {
-        value = [data?.totalBalance, data?.balance, data?.available_balance, data?.remaining_balance, data?.total_balance]
-            .map(number).find(item => item != null) ?? null;
-    }
-    return value == null ? null : { value, currency, kind: 'balance' };
+    const currency = data?.currency || payload?.currency;
+    // A saved field path is not evidence of an account total: it may name key
+    // quota, cumulative purchases, or a partial available balance. Prefer a
+    // server-declared total; accept a plain account balance only if no total
+    // field was returned at all.
+    const totals = ['total_balance', 'totalBalance', 'account_balance'].filter(name => Object.prototype.hasOwnProperty.call(data, name));
+    const value = totals.length ? totals.map(name => number(data[name])).find(item => item != null) ?? null : number(data?.balance);
+    return accountBalance(value, currency);
 }
 
 function apiRoots(base) {
@@ -165,11 +169,14 @@ function apiRoots(base) {
     return [...new Set([`${base.origin}${path}`, base.origin])];
 }
 
-function tokenInfo(payload) {
-    const data = payload?.data || payload;
-    const available = number(data?.total_available);
-    const unlimited = data?.unlimited_quota === true;
-    return available != null || unlimited ? { available, unlimited } : null;
+function responseScope(payload) {
+    const objects = [payload, payload?.data].filter(value => value && typeof value === 'object');
+    if (objects.some(value => value.object === 'token_usage' || typeof value.unlimited_quota === 'boolean')) return 'token';
+    const scopes = objects.flatMap(value => [value.balance_scope, value.scope])
+        .filter(value => typeof value === 'string' && value.trim()).map(value => value.trim().toLowerCase());
+    if (scopes.some(value => ['token', 'key', 'api_key', 'apikey'].includes(value))) return 'token';
+    if (scopes.some(value => value !== 'account')) return 'unknown';
+    return scopes.length ? 'account' : '';
 }
 
 function quotaMetadata(payload) {
@@ -178,62 +185,45 @@ function quotaMetadata(payload) {
     if (!type && typeof data?.display_in_currency === 'boolean') type = data.display_in_currency ? 'USD' : 'TOKENS';
     if (!['USD', 'CNY', 'TOKENS', 'CUSTOM'].includes(type)) type = '';
     const perUnit = number(data?.quota_per_unit);
+    // These are explicit server declarations. Missing values are unknown: the
+    // stock public status response usually does not expose this setting.
+    const tokenStatFlags = [data?.display_token_stat, data?.display_token_stat_enabled, data?.DisplayTokenStatEnabled];
+    const scope = tokenStatFlags.includes(true) ? 'token'
+        : tokenStatFlags.includes(false) && perUnit > 0 ? 'account' : '';
     return {
-        type, perUnit: perUnit > 0 ? perUnit : null,
+        type, perUnit: perUnit > 0 ? perUnit : null, scope,
         cnyRate: number(data?.usd_exchange_rate),
         customRate: number(data?.custom_currency_exchange_rate),
         symbol: typeof data?.custom_currency_symbol === 'string' ? data.custom_currency_symbol.slice(0, 12) : '',
     };
 }
 
-function tokenBalance(token, meta) {
-    if (token.unlimited) return { value: '不限额', currency: '', kind: 'token', message: '该密钥未设额度上限；仍受账户余额限制。' };
-    if (meta?.perUnit && meta.type === 'USD') return { value: token.available / meta.perUnit, currency: 'USD', kind: 'token' };
-    if (meta?.perUnit && meta.type === 'CNY' && meta.cnyRate > 0) {
-        return { value: token.available / meta.perUnit * meta.cnyRate, currency: 'CNY', kind: 'token' };
-    }
-    if (meta?.perUnit && meta.type === 'CUSTOM' && meta.customRate > 0 && meta.symbol) {
-        return { value: token.available / meta.perUnit * meta.customRate, currency: meta.symbol, kind: 'token' };
-    }
-    return {
-        value: token.available, currency: '额度单位', kind: 'quota',
-        message: meta?.type === 'TOKENS' ? '站点以原始额度单位计量。' : '无法读取站点的金额换算信息，显示原始密钥额度。',
-    };
-}
-
 /**
- * New API returns raw quota at /api/usage/token/. Its billing *_usd fields use
- * the site's display unit; CNY is already converted and TOKENS is raw quota.
- * Billing scope depends on the server's DisplayTokenStatEnabled setting.
- * https://github.com/QuantumNous/new-api/blob/v0.13.2/controller/token.go
+ * New API billing uses account data only when DisplayTokenStatEnabled=false.
+ * Its *_usd fields use the site's display unit, so field names prove neither
+ * account scope nor currency. Token usage is never an account-balance fallback.
  * https://github.com/QuantumNous/new-api/blob/v0.13.2/controller/billing.go
  */
-function billingBalance(subscription, usage, token, meta) {
+function billingBalance(subscription, usage, meta) {
+    const scopes = [responseScope(subscription), responseScope(usage)];
+    if (meta?.scope === 'token' || scopes.some(scope => ['token', 'unknown'].includes(scope))) return null;
+    if (meta?.scope !== 'account' && !scopes.every(scope => scope === 'account')) return null;
     const total = number(subscription?.hard_limit_usd ?? subscription?.system_hard_limit_usd);
     const used = number(usage?.total_usage);
-    if (total == null || used == null || (token?.unlimited && total === 100000000)) return null;
-    if (!token && total === 100000000) {
-        // Older One API versions have no token-usage endpoint. The same fixed
-        // number can be an unlimited-token sentinel or a finite raw quota, so
-        // neither an amount nor an unlimited account balance can be inferred.
-        return { value: '无法确认', currency: '', kind: 'available', message: '站点账单可能返回了无限额度标记，未能确认实际金额。' };
-    }
+    if (total == null || used == null) return null;
     let value = total - used / 100;
-    const explicitCurrency = typeof subscription?.currency === 'string' ? subscription.currency : '';
-    // A confirmed New API token must not turn raw quota into dollars merely
-    // because that server reused OpenAI's historical *_usd field names.
-    if (token && !meta?.type && !explicitCurrency) return null;
-    const unitKnown = Boolean(explicitCurrency || meta?.type);
-    let currency = explicitCurrency || meta?.type || '额度单位';
+    const subscriptionCurrency = typeof subscription?.currency === 'string' ? subscription.currency.trim() : '';
+    const usageCurrency = typeof usage?.currency === 'string' ? usage.currency.trim() : '';
+    if (subscriptionCurrency && usageCurrency && subscriptionCurrency !== usageCurrency) return null;
+    let currency = subscriptionCurrency || usageCurrency || meta?.type;
+    if (!currency) return null;
     if (currency === 'TOKENS') currency = '额度单位';
     if (currency === 'CUSTOM') {
         if (!(meta?.customRate > 0 && meta?.symbol)) return null;
         value *= meta.customRate;
         currency = meta.symbol;
     }
-    return { value, currency, kind: 'available', message: unitKnown
-        ? '站点账单可用额度，统计范围由服务端设置决定。'
-        : '账单未提供可确认的币种，按站点返回的额度单位显示。' };
+    return accountBalance(value, currency);
 }
 
 /** Returns a balance only after a protocol-specific response has been verified. */
@@ -245,6 +235,7 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
     const provider = identifyProvider(base.href);
     const errors = [];
     const cache = new Map();
+    let unprovenBalance = false;
     async function attempt(url, publicRequest = false) {
         const target = httpUrl(url);
         if (target.origin !== base.origin) throw fail('余额查询地址与 API 地址不同，已阻止发送密钥。');
@@ -264,57 +255,56 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
         try { legacy = httpUrl(new URL(account.balanceUrl, `${base.origin}/`).href); } catch { /* invalid legacy URL */ }
         if (legacy?.origin === base.origin) {
             const payload = await attempt(legacy.href);
-            const result = payload && parseLegacy(payload, account);
+            const result = payload && parseLegacy(payload);
             if (result) return result;
+            if (payload) unprovenBalance = true;
         }
     }
 
     if (provider === 'deepseek') {
         const payload = await attempt(`${base.origin}/user/balance`);
-        const info = payload?.balance_infos?.find(item => number(item?.total_balance) != null && typeof item?.currency === 'string');
-        if (info) return { value: number(info.total_balance), currency: info.currency, kind: 'balance' };
+        const info = payload?.balance_infos?.find(item => number(item?.total_balance) != null && typeof item?.currency === 'string' && item.currency.trim());
+        if (info) return accountBalance(info.total_balance, info.currency);
     } else if (provider === 'siliconflow') {
         const payload = await attempt(`${base.origin}/v1/user/info`);
-        const value = number(payload?.data?.totalBalance) ?? number(payload?.data?.balance);
-        if (value != null) return { value, currency: base.hostname.endsWith('.cn') ? 'CNY' : 'USD', kind: 'balance' };
+        const free = number(payload?.data?.balance);
+        const paid = number(payload?.data?.chargeBalance);
+        const value = number(payload?.data?.totalBalance) ?? (free != null && paid != null ? free + paid : null);
+        if (value != null) return accountBalance(value, base.hostname.endsWith('.cn') ? 'CNY' : 'USD');
     } else if (provider === 'moonshot') {
         const payload = await attempt(`${base.origin}/v1/users/me/balance`);
         const value = number(payload?.data?.available_balance);
-        if (value != null) return { value, currency: base.hostname.endsWith('.cn') ? 'CNY' : 'USD', kind: 'balance' };
+        if (value != null) return accountBalance(value, base.hostname.endsWith('.cn') ? 'CNY' : 'USD');
     } else if (provider === 'openrouter') {
         const payload = await attempt(`${base.origin}/api/v1/credits`);
         const total = number(payload?.data?.total_credits);
         const used = number(payload?.data?.total_usage);
-        if (total != null && used != null) return { value: total - used, currency: 'USD', kind: 'balance' };
-        const keyPayload = await attempt(`${base.origin}/api/v1/key`);
-        const remaining = number(keyPayload?.data?.limit_remaining);
-        if (remaining != null) return { value: remaining, currency: 'USD', kind: 'token' };
-        if (keyPayload?.data && keyPayload.data.limit === null) return { value: '不限额', currency: '', kind: 'token', message: '该密钥未设额度上限；仍受账户余额限制。' };
+        if (total != null && used != null) return accountBalance(total - used, 'USD');
     } else if (provider === 'openai') {
-        throw fail('OpenAI 官方没有向普通 API Key 开放账户余额接口，请在其控制台查看。', { unsupported: true });
+        throw accountBalanceUnavailable('OpenAI 官方没有向普通 API Key 开放账户总余额接口，请在其控制台查看。');
     } else {
-        let fallback = null;
         for (const root of apiRoots(base)) {
-            const tokenPayload = await attempt(`${root}/api/usage/token/`);
-            const token = tokenPayload && tokenInfo(tokenPayload);
             const metaPayload = await attempt(`${root}/api/status`, true);
             const meta = metaPayload ? quotaMetadata(metaPayload) : null;
+            if (meta?.scope === 'token') { unprovenBalance = true; continue; }
             for (const prefix of ['', '/v1']) {
                 const [subscription, usage] = await Promise.all([
                     attempt(`${root}${prefix}/dashboard/billing/subscription`),
                     attempt(`${root}${prefix}/dashboard/billing/usage`),
                 ]);
-                const result = subscription && usage && billingBalance(subscription, usage, token, meta);
+                const result = subscription && usage && billingBalance(subscription, usage, meta);
                 if (result) return result;
+                if (subscription && usage) unprovenBalance = true;
             }
-            if (token && !fallback) fallback = tokenBalance(token, meta);
         }
-        if (fallback) return fallback;
     }
 
+    const proxyAuth = errors.find(error => error.proxyAuthRequired);
+    if (proxyAuth) throw proxyAuth;
+    if (unprovenBalance) throw accountBalanceUnavailable();
     const transport = errors.find(error => error.proxyUnavailable) || errors.find(error => error.network);
     const denied = errors.find(error => [401, 403].includes(error.status));
     const service = errors.find(error => error.logical || (error.status && ![404, 405, 410, 501].includes(error.status)));
     if (transport || denied || service) throw transport || denied || service;
-    throw fail('未找到该站点可用的余额接口，已尝试令牌额度和兼容账单查询。', { unsupported: true });
+    throw accountBalanceUnavailable();
 }
