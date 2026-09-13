@@ -1,0 +1,87 @@
+<!-- A collapsible account card below SillyTavern's available models. -->
+<details id="st-api-account-manager" class="sam-panel" aria-labelledby="sam-title">
+  <summary class="sam-header">
+    <span class="sam-card-icon fa-solid fa-address-card" aria-hidden="true"></span>
+    <span class="sam-header-text">
+      <span id="sam-title" class="sam-title">API 账户管理</span>
+      <span id="sam-account-count" class="sam-muted">已保存 0 个</span>
+    </span>
+    <span class="sam-toggle-label" aria-hidden="true"><span class="sam-expand-label">展开</span><span class="sam-collapse-label">收起</span></span>
+  </summary>
+  <div class="sam-content">
+
+    <div id="sam-group-tabs" class="sam-group-tabs" role="group" aria-label="账户分组"></div>
+    <div class="sam-list-tools">
+      <button id="sam-refresh-all" class="menu_button sam-button sam-button-small" type="button">刷新全部余额</button>
+    </div>
+    <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
+      <div class="sam-empty">还没有保存的 API，在下方填写信息即可添加。</div>
+    </div>
+    <div class="sam-refresh-settings">
+      <label class="checkbox_label sam-check-row" for="sam-auto-refresh">
+        <input id="sam-auto-refresh" type="checkbox" />
+        <span>自动刷新余额</span>
+      </label>
+      <div class="sam-interval-row">
+        <label for="sam-refresh-interval">每</label>
+        <input id="sam-refresh-interval" class="text_pole sam-control sam-number" type="number" min="1" max="1440" step="1" value="30" inputmode="numeric" aria-label="余额刷新间隔（分钟）" />
+        <span>分钟</span>
+      </div>
+    </div>
+
+    <form id="sam-account-form" class="sam-form" autocomplete="off">
+      <div class="sam-form-heading">
+        <h4 id="sam-form-title">添加 API</h4>
+        <button id="sam-cancel-edit" class="menu_button sam-button sam-button-small" type="button" hidden>取消编辑</button>
+      </div>
+      <input id="sam-account-id" name="accountId" type="hidden" />
+      <div class="sam-field-grid">
+        <div class="sam-field">
+          <label for="sam-name">账户名称 *</label>
+          <input id="sam-name" name="name" class="text_pole sam-control" type="text" required maxlength="80" placeholder="例如：常用中转站" />
+        </div>
+        <div class="sam-field">
+          <label for="sam-group">分组（可选）</label>
+          <div class="sam-group-editor">
+            <input id="sam-group" name="group" class="text_pole sam-control" type="text" list="sam-group-options" maxlength="60" placeholder="填写或选择分组" />
+            <select id="sam-group-select" class="text_pole sam-control" aria-label="选择已保存分组">
+              <option value="">选择已保存分组</option>
+            </select>
+          </div>
+          <datalist id="sam-group-options"></datalist>
+        </div>
+      </div>
+
+      <div class="sam-field">
+        <label for="sam-base-url">API 基础地址 *</label>
+        <input id="sam-base-url" name="baseUrl" class="text_pole sam-control" type="url" required placeholder="https://api.example.com" spellcheck="false" />
+      </div>
+      <div class="sam-field">
+        <label for="sam-api-key">API Key *</label>
+        <div class="sam-secret-wrap">
+          <input id="sam-api-key" name="apiKey" class="text_pole sam-control" type="password" required placeholder="sk-…" spellcheck="false" autocomplete="new-password" />
+          <button id="sam-key-toggle" class="menu_button sam-button" type="button" aria-label="显示 API Key" aria-pressed="false" title="显示或隐藏 API Key">显示</button>
+        </div>
+        <p class="sam-help">编辑已有账户时，Key 留空即可保留。</p>
+      </div>
+      <div class="sam-field">
+        <div class="sam-label-row">
+          <label for="sam-model-select">默认模型</label>
+          <button id="sam-fetch-models" class="menu_button sam-button sam-button-small" type="button">获取模型</button>
+        </div>
+        <select id="sam-model-select" name="model" class="text_pole sam-control">
+          <option value="">请先获取模型</option>
+        </select>
+      </div>
+
+      <div class="sam-balance-row sam-form-balance">
+        <output id="sam-form-balance" class="sam-account-balance" aria-live="polite">账户余额：保存后可查询</output>
+        <button id="sam-fetch-balance" class="menu_button sam-button sam-button-small" type="button" disabled>查询余额</button>
+      </div>
+      <div class="sam-form-actions">
+        <button id="sam-save-account" class="menu_button sam-button sam-button-primary" type="submit">保存 API</button>
+      </div>
+    </form>
+    <p id="sam-status" class="sam-status" role="status" aria-live="polite">就绪</p>
+  </div>
+</details>
