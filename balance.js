@@ -152,7 +152,13 @@ export async function requestApiJson(url, apiKey = '', options = {}) {
 }
 
 function parseLegacy(payload) {
-    if (responseScope(payload) !== 'account') return null;
+    const scope = responseScope(payload);
+    // A number of gateway balance endpoints return a top-level
+    // `total_balance`/`account_balance` plus currency without a scope field.
+    // Those explicit *total* names are sufficient evidence of account scope;
+    // a bare `balance` remains gated on an explicit account declaration so a
+    // per-key quota cannot be mistaken for the account total.
+    if (scope === 'token' || scope === 'unknown') return null;
     const data = payload?.data || payload;
     const currency = data?.currency || payload?.currency;
     // A saved field path is not evidence of an account total: it may name key
@@ -160,7 +166,18 @@ function parseLegacy(payload) {
     // server-declared total; accept a plain account balance only if no total
     // field was returned at all.
     const totals = ['total_balance', 'totalBalance', 'account_balance'].filter(name => Object.prototype.hasOwnProperty.call(data, name));
+    if (scope !== 'account' && !totals.length) return null;
     const value = totals.length ? totals.map(name => number(data[name])).find(item => item != null) ?? null : number(data?.balance);
+    return accountBalance(value, currency);
+}
+
+function parseDiscoveredBalance(payload) {
+    if (!payload || typeof payload !== 'object' || responseScope(payload) === 'token') return null;
+    const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+    const currency = data.currency || payload.currency || data.unit || payload.unit;
+    if (typeof currency !== 'string' || !currency.trim()) return null;
+    const value = ['total_balance', 'totalBalance', 'account_balance', 'balance', 'available_balance']
+        .map(name => number(data[name])).find(item => item != null);
     return accountBalance(value, currency);
 }
 
@@ -296,15 +313,12 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
                 if (result) return result;
                 if (subscription && usage) unprovenBalance = true;
             }
-        }
-        // Custom gateways may expose a simple account balance route instead
-        // of dashboard billing. Only explicitly account-scoped responses are
-        // accepted by parseLegacy.
-        for (const suffix of ['/balance', '/v1/balance', '/account/balance', '/v1/account/balance']) {
-            const payload = await attempt(`${base.origin}${suffix}`);
-            const result = payload && parseLegacy(payload);
-            if (result) return result;
-            if (payload) unprovenBalance = true;
+            for (const suffix of ['/balance', '/v1/balance', '/account/balance', '/v1/account/balance']) {
+                const payload = await attempt(`${root}${suffix}`);
+                const result = payload && parseDiscoveredBalance(payload);
+                if (result) return result;
+                if (payload) unprovenBalance = true;
+            }
         }
     }
 

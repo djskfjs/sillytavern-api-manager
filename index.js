@@ -387,6 +387,11 @@ async function refreshBalance(account, options = {}) {
     activeBalanceQueries.set(snapshot.id, query);
     account.balance = { ...normalizeBalance(account.balance), status: 'loading', message: '' };
     renderAccounts();
+    // Re-rendering the account list removes the clicked button. On mobile,
+    // that focus change can make SillyTavern's outer scroll container jump
+    // to the top before the asynchronous request completes. Restore the
+    // position immediately as well as when the query settles.
+    restoreScrollPosition(scrollPosition);
     return query.promise;
 }
 
@@ -544,20 +549,27 @@ function captureScrollPosition() {
     }
     const scrolling = document.scrollingElement;
     if (scrolling) positions.push([scrolling, scrolling.scrollTop, scrolling.scrollLeft]);
-    return positions;
+    return { positions, windowX: globalThis.scrollX || 0, windowY: globalThis.scrollY || 0 };
 }
 
 function restoreScrollPosition(positions) {
-    for (const [node, top, left] of positions || []) {
+    const saved = positions?.positions || positions || [];
+    for (const [node, top, left] of saved) {
         node.scrollTop = top;
         node.scrollLeft = left;
     }
+    if (positions?.windowY != null) globalThis.scrollTo?.(positions.windowX || 0, positions.windowY);
     requestAnimationFrame(() => {
-        for (const [node, top, left] of positions || []) {
+        for (const [node, top, left] of saved) {
             node.scrollTop = top;
             node.scrollLeft = left;
         }
+        if (positions?.windowY != null) globalThis.scrollTo?.(positions.windowX || 0, positions.windowY);
     });
+    setTimeout(() => {
+        for (const [node, top, left] of saved) { node.scrollTop = top; node.scrollLeft = left; }
+        if (positions?.windowY != null) globalThis.scrollTo?.(positions.windowX || 0, positions.windowY);
+    }, 120);
 }
 
 function filteredAccounts(accounts, filter) {
