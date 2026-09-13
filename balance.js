@@ -297,6 +297,15 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
                 if (subscription && usage) unprovenBalance = true;
             }
         }
+        // Custom gateways may expose a simple account balance route instead
+        // of dashboard billing. Only explicitly account-scoped responses are
+        // accepted by parseLegacy.
+        for (const suffix of ['/balance', '/v1/balance', '/account/balance', '/v1/account/balance']) {
+            const payload = await attempt(`${base.origin}${suffix}`);
+            const result = payload && parseLegacy(payload);
+            if (result) return result;
+            if (payload) unprovenBalance = true;
+        }
     }
 
     const proxyAuth = errors.find(error => error.proxyAuthRequired);

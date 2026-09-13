@@ -42,7 +42,12 @@
         </div>
         <div class="sam-field">
           <label for="sam-group">分组（可选）</label>
-          <input id="sam-group" name="group" class="text_pole sam-control" type="text" list="sam-group-options" maxlength="60" placeholder="填写或选择分组" />
+          <div class="sam-group-editor">
+            <input id="sam-group" name="group" class="text_pole sam-control" type="text" list="sam-group-options" maxlength="60" placeholder="填写或选择分组" />
+            <select id="sam-group-select" class="text_pole sam-control" aria-label="选择已保存分组">
+              <option value="">选择已保存分组</option>
+            </select>
+          </div>
           <datalist id="sam-group-options"></datalist>
         </div>
       </div>

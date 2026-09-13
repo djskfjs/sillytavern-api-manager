@@ -8,11 +8,11 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.3.0';
-import { displayApiUrl, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.3.0';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.3.1';
+import { displayApiUrl, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.3.1';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.3.0';
+const EXTENSION_VERSION = '1.3.1';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 2;
 
@@ -345,6 +345,7 @@ async function fetchModelsForDraft() {
 }
 
 async function refreshBalance(account, options = {}) {
+    const scrollPosition = captureScrollPosition();
     const snapshot = { ...account };
     const active = activeBalanceQueries.get(snapshot.id);
     if (active && active.snapshot.baseUrl === snapshot.baseUrl && active.snapshot.apiKey === snapshot.apiKey) {
@@ -379,6 +380,7 @@ async function refreshBalance(account, options = {}) {
             if (activeBalanceQueries.get(snapshot.id) === query) {
                 activeBalanceQueries.delete(snapshot.id);
                 renderAccounts();
+                restoreScrollPosition(scrollPosition);
             }
         }
     });
@@ -524,6 +526,38 @@ function renderGroupSuggestions() {
             return option;
         }));
     }
+    const select = $('#sam-group-select');
+    if (select) {
+        const current = asString($('#sam-group')?.value);
+        select.replaceChildren(new Option('选择已保存分组', ''));
+        for (const group of groups) select.append(new Option(group, group));
+        select.value = groups.includes(current) ? current : '';
+    }
+}
+
+function captureScrollPosition() {
+    const positions = [];
+    let node = rootElement();
+    while (node) {
+        if (node.scrollTop || node.scrollHeight > node.clientHeight) positions.push([node, node.scrollTop, node.scrollLeft]);
+        node = node.parentElement;
+    }
+    const scrolling = document.scrollingElement;
+    if (scrolling) positions.push([scrolling, scrolling.scrollTop, scrolling.scrollLeft]);
+    return positions;
+}
+
+function restoreScrollPosition(positions) {
+    for (const [node, top, left] of positions || []) {
+        node.scrollTop = top;
+        node.scrollLeft = left;
+    }
+    requestAnimationFrame(() => {
+        for (const [node, top, left] of positions || []) {
+            node.scrollTop = top;
+            node.scrollLeft = left;
+        }
+    });
 }
 
 function filteredAccounts(accounts, filter) {
@@ -813,6 +847,10 @@ function bindEvents() {
         settings.accountFilter = normalizeAccountFilter({ type: button.dataset.filter, group: button.dataset.group }, settings.accounts);
         persist();
         renderAccounts();
+    });
+    $('#sam-group-select')?.addEventListener('change', event => {
+        const input = $('#sam-group');
+        if (input && event.target.value) input.value = event.target.value;
     });
     $('#sam-auto-refresh')?.addEventListener('change', event => {
         settings.autoRefresh = Boolean(event.target.checked);

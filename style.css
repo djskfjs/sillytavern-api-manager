@@ -222,3 +222,7 @@
 @container (max-width: 270px) {
   #st-api-account-manager .sam-field-grid { grid-template-columns: minmax(0, 1fr); gap: 0; }
 }
+
+.sam-group-editor { display:flex; gap:6px; align-items:center; }
+.sam-group-editor select { max-width: 12rem; }
+@media (max-width: 600px) { .sam-group-editor { flex-direction:column; align-items:stretch; } .sam-group-editor select { max-width:none; } }
