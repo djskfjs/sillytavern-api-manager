@@ -104,9 +104,9 @@ export async function requestApiJson(url, apiKey = '', options = {}) {
         let text;
         try {
             response = await fetchImpl(endpoint, {
-                // Omit browser-managed credentials even for the same-origin
-                // proxy, so a WWW-Authenticate challenge cannot open HTTP login.
-                method: 'GET', headers, cache: 'no-store', credentials: 'omit',
+                // Direct provider requests never receive browser credentials.
+                // The local proxy needs the active SillyTavern session cookie.
+                method: 'GET', headers, cache: 'no-store', credentials: proxy ? 'same-origin' : 'omit',
                 redirect: 'error', signal: controller.signal,
             });
             text = await response.text();
@@ -186,6 +186,13 @@ function apiRoots(base) {
     return [...new Set([`${base.origin}${path}`, base.origin])];
 }
 
+function tokenInfo(payload) {
+    const data = payload?.data || payload;
+    const available = number(data?.total_available ?? data?.quota ?? data?.balance);
+    const unlimited = data?.unlimited_quota === true;
+    return available != null || unlimited ? { available, unlimited } : null;
+}
+
 function responseScope(payload) {
     const objects = [payload, payload?.data].filter(value => value && typeof value === 'object');
     if (objects.some(value => value.object === 'token_usage' || typeof value.unlimited_quota === 'boolean')) return 'token';
@@ -213,6 +220,24 @@ function quotaMetadata(payload) {
         customRate: number(data?.custom_currency_exchange_rate),
         symbol: typeof data?.custom_currency_symbol === 'string' ? data.custom_currency_symbol.slice(0, 12) : '',
     };
+}
+
+function tokenBalance(token, meta) {
+    if (token.unlimited) {
+        return { value: '不限额', currency: '', kind: 'token', scope: 'token', message: '此 API Key 未设置额度上限。' };
+    }
+    if (token.available == null) return null;
+    if (meta?.perUnit && meta.type === 'USD') {
+        return { value: token.available / meta.perUnit, currency: 'USD', kind: 'token', scope: 'token' };
+    }
+    if (meta?.perUnit && meta.type === 'CNY' && meta.cnyRate > 0) {
+        return { value: token.available / meta.perUnit * meta.cnyRate, currency: 'CNY', kind: 'token', scope: 'token' };
+    }
+    if (meta?.perUnit && meta.type === 'CUSTOM' && meta.customRate > 0 && meta.symbol) {
+        return { value: token.available / meta.perUnit * meta.customRate, currency: meta.symbol, kind: 'token', scope: 'token' };
+    }
+    return { value: token.available, currency: meta?.type === 'TOKENS' ? '额度单位' : '', kind: 'quota', scope: 'token',
+        message: meta?.type === 'TOKENS' ? '' : '站点没有提供金额换算，显示原始可用额度。' };
 }
 
 /**
@@ -297,13 +322,21 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
         const total = number(payload?.data?.total_credits);
         const used = number(payload?.data?.total_usage);
         if (total != null && used != null) return accountBalance(total - used, 'USD');
+        const keyPayload = await attempt(`${base.origin}/api/v1/key`);
+        const remaining = number(keyPayload?.data?.limit_remaining);
+        if (remaining != null) return { value: remaining, currency: 'USD', kind: 'token', scope: 'token' };
+        if (keyPayload?.data?.limit === null) return { value: '不限额', currency: '', kind: 'token', scope: 'token' };
     } else if (provider === 'openai') {
         throw accountBalanceUnavailable('OpenAI 官方没有向普通 API Key 开放账户总余额接口，请在其控制台查看。');
     } else {
+        let tokenFallback = null;
         for (const root of apiRoots(base)) {
+            const tokenPayload = await attempt(`${root}/api/usage/token/`);
             const metaPayload = await attempt(`${root}/api/status`, true);
             const meta = metaPayload ? quotaMetadata(metaPayload) : null;
-            if (meta?.scope === 'token') { unprovenBalance = true; continue; }
+            const token = tokenPayload ? tokenInfo(tokenPayload) : null;
+            if (token && !tokenFallback) tokenFallback = tokenBalance(token, meta);
+            if (meta?.scope === 'token') continue;
             for (const prefix of ['', '/v1']) {
                 const [subscription, usage] = await Promise.all([
                     attempt(`${root}${prefix}/dashboard/billing/subscription`),
@@ -320,6 +353,7 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
                 if (payload) unprovenBalance = true;
             }
         }
+        if (tokenFallback) return tokenFallback;
     }
 
     const proxyAuth = errors.find(error => error.proxyAuthRequired);

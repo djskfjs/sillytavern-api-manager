@@ -8,11 +8,11 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.3.1';
-import { displayApiUrl, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.3.1';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.4.0';
+import { displayApiUrl, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.4.0';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.3.1';
+const EXTENSION_VERSION = '1.4.0';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 2;
 
@@ -69,19 +69,19 @@ function isHttpUrl(value) {
 function normalizeBalance(balance) {
     const empty = { status: 'unknown', value: null, currency: '', kind: 'balance', scope: '', message: '', fetchedAt: 0 };
     if (!balance || typeof balance !== 'object') return empty;
-    if (balance.status === 'ok' && (balance.scope !== 'account'
-        || (balance.kind && balance.kind !== 'balance')
-        || typeof balance.value !== 'number' || !Number.isFinite(balance.value))) {
-        // Old versions cached key quotas and ambiguous billing amounts. They
-        // cannot be relabelled as an account's total balance during migration.
+    const kind = ['balance', 'token', 'quota'].includes(balance.kind) ? balance.kind : 'balance';
+    const finiteValue = typeof balance.value === 'number' && Number.isFinite(balance.value);
+    const unlimited = kind === 'token' && balance.value === '不限额';
+    const validScope = kind === 'balance' ? balance.scope === 'account' : balance.scope === 'token';
+    if (balance.status === 'ok' && (!validScope || (!finiteValue && !unlimited))) {
         return empty;
     }
     return {
         status: ['ok', 'loading', 'error', 'unsupported', 'unknown'].includes(balance.status) ? balance.status : 'unknown',
         value: balance.value == null ? null : balance.value,
         currency: asString(balance.currency),
-        kind: 'balance',
-        scope: balance.scope === 'account' ? 'account' : '',
+        kind,
+        scope: balance.scope === 'account' ? 'account' : balance.scope === 'token' ? 'token' : '',
         message: asString(balance.message),
         fetchedAt: Number.isFinite(Number(balance.fetchedAt)) ? Number(balance.fetchedAt) : 0,
     };
@@ -200,7 +200,9 @@ function readForm() {
     return {
         id: accountId || makeId(),
         name: asString($('#sam-name')?.value).trim(),
-        group: asString($('#sam-group')?.value).trim(),
+        group: $('#sam-group')?.value === '__new__'
+            ? asString($('#sam-new-group')?.value).trim()
+            : asString($('#sam-group')?.value).trim(),
         favorite: existing?.favorite === true,
         provider: identifyProvider(baseUrl),
         baseUrl,
@@ -234,6 +236,10 @@ function clearForm() {
         modelSelect.append(option);
     }
     formModels = [];
+    if ($('#sam-new-group')) {
+        $('#sam-new-group').hidden = true;
+        $('#sam-new-group').value = '';
+    }
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = true;
     if ($('#sam-save-account')) $('#sam-save-account').textContent = '保存 API';
     if ($('#sam-form-title')) $('#sam-form-title').textContent = '添加 API';
@@ -252,7 +258,6 @@ function fillForm(account) {
     const values = {
         '#sam-account-id': account.id,
         '#sam-name': account.name,
-        '#sam-group': account.group,
         '#sam-base-url': displayApiUrl(account.baseUrl),
         '#sam-api-key': '',
     };
@@ -260,6 +265,7 @@ function fillForm(account) {
         const input = $(selector);
         if (input) input.value = value;
     }
+    renderGroupSuggestions(account.group);
     formModels = [...account.models];
     populateModelSelect(formModels, account.selectedModel);
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = false;
@@ -345,7 +351,6 @@ async function fetchModelsForDraft() {
 }
 
 async function refreshBalance(account, options = {}) {
-    const scrollPosition = captureScrollPosition();
     const snapshot = { ...account };
     const active = activeBalanceQueries.get(snapshot.id);
     if (active && active.snapshot.baseUrl === snapshot.baseUrl && active.snapshot.apiKey === snapshot.apiKey) {
@@ -379,19 +384,14 @@ async function refreshBalance(account, options = {}) {
         } finally {
             if (activeBalanceQueries.get(snapshot.id) === query) {
                 activeBalanceQueries.delete(snapshot.id);
-                renderAccounts();
-                restoreScrollPosition(scrollPosition);
+                const current = settings.accounts.find(item => item.id === snapshot.id);
+                if (current) updateAccountBalanceUi(current);
             }
         }
     });
     activeBalanceQueries.set(snapshot.id, query);
     account.balance = { ...normalizeBalance(account.balance), status: 'loading', message: '' };
-    renderAccounts();
-    // Re-rendering the account list removes the clicked button. On mobile,
-    // that focus change can make SillyTavern's outer scroll container jump
-    // to the top before the asynchronous request completes. Restore the
-    // position immediately as well as when the query settles.
-    restoreScrollPosition(scrollPosition);
+    updateAccountBalanceUi(account);
     return query.promise;
 }
 
@@ -405,18 +405,18 @@ async function refreshAllBalances(options = {}) {
         if (!options.silent) notify('余额刷新完成。', 'success');
     } finally {
         isLoadingBalance = false;
-        renderAccounts();
     }
 }
 
 function formatBalance(balance) {
-    const label = '账户余额';
+    const label = ['token', 'quota'].includes(balance?.kind) ? '密钥可用额度' : '账户余额';
     if (balance?.status === 'loading') return `${label}：查询中…`;
     if (balance?.status === 'unsupported') return `${label}：${balance.message || '站点未开放查询接口'}`;
     if (balance?.status === 'error') return `${label}：查询失败（${balance.message || '未知错误'}）`;
-    if (balance?.status !== 'ok' || balance.scope !== 'account'
-        || typeof balance.value !== 'number' || !Number.isFinite(balance.value)) return `${label}：未查询`;
-    const value = balance.value.toLocaleString(undefined, { maximumFractionDigits: 8 });
+    if (balance?.status !== 'ok') return `${label}：未查询`;
+    const value = typeof balance.value === 'number'
+        ? balance.value.toLocaleString(undefined, { maximumFractionDigits: 8 }) : balance.value;
+    if (value == null || value === '') return `${label}：未查询`;
     return `${label}：${value}${balance.currency ? ` ${balance.currency}` : ''}`;
 }
 
@@ -437,6 +437,28 @@ function updateFormBalance() {
         button.disabled = !account || account.balance?.status === 'loading';
         button.textContent = account?.balance?.status === 'loading' ? '查询中…' : '查询余额';
     }
+}
+
+function updateAccountBalanceUi(account) {
+    const card = $$('.sam-account-item').find(item => item.dataset.accountId === account.id);
+    if (card) {
+        const output = $('.sam-account-balance', card);
+        if (output) {
+            output.textContent = formatBalance(account.balance);
+            output.dataset.state = account.balance?.status || 'unknown';
+        }
+        const button = $('button[data-action="balance"]', card);
+        if (button) {
+            button.disabled = account.balance?.status === 'loading';
+            button.textContent = button.disabled ? '查询中…' : '刷新余额';
+        }
+        const time = $('.sam-account-time', card);
+        if (time) {
+            time.hidden = !account.balance?.fetchedAt;
+            time.textContent = account.balance?.fetchedAt ? `更新于 ${formatTime(account.balance.fetchedAt)}` : '';
+        }
+    }
+    if ($('#sam-account-id')?.value === account.id) updateFormBalance();
 }
 
 function createAccountCard(account) {
@@ -492,12 +514,11 @@ function createAccountCard(account) {
     balanceButton.setAttribute('aria-label', `查询 ${account.name} 的余额`);
     balanceRow.append(balance, balanceButton);
     item.append(balanceRow);
-    if (account.balance?.fetchedAt) {
-        const time = document.createElement('div');
-        time.className = 'sam-account-time';
-        time.textContent = `更新于 ${formatTime(account.balance.fetchedAt)}`;
-        item.append(time);
-    }
+    const time = document.createElement('div');
+    time.className = 'sam-account-time';
+    time.hidden = !account.balance?.fetchedAt;
+    time.textContent = account.balance?.fetchedAt ? `更新于 ${formatTime(account.balance.fetchedAt)}` : '';
+    item.append(time);
 
     const actions = document.createElement('div');
     actions.className = 'sam-account-actions';
@@ -521,55 +542,19 @@ function createAccountCard(account) {
     return item;
 }
 
-function renderGroupSuggestions() {
-    const groups = [...new Set(settings.accounts.map(account => account.group).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-    const suggestions = $('#sam-group-options');
-    if (suggestions) {
-        suggestions.replaceChildren(...groups.map(group => {
-            const option = document.createElement('option');
-            option.value = group;
-            return option;
-        }));
-    }
-    const select = $('#sam-group-select');
-    if (select) {
-        const current = asString($('#sam-group')?.value);
-        select.replaceChildren(new Option('选择已保存分组', ''));
-        for (const group of groups) select.append(new Option(group, group));
-        select.value = groups.includes(current) ? current : '';
-    }
-}
-
-function captureScrollPosition() {
-    const positions = [];
-    let node = rootElement();
-    while (node) {
-        if (node.scrollTop || node.scrollHeight > node.clientHeight) positions.push([node, node.scrollTop, node.scrollLeft]);
-        node = node.parentElement;
-    }
-    const scrolling = document.scrollingElement;
-    if (scrolling) positions.push([scrolling, scrolling.scrollTop, scrolling.scrollLeft]);
-    return { positions, windowX: globalThis.scrollX || 0, windowY: globalThis.scrollY || 0 };
-}
-
-function restoreScrollPosition(positions) {
-    const saved = positions?.positions || positions || [];
-    for (const [node, top, left] of saved) {
-        node.scrollTop = top;
-        node.scrollLeft = left;
-    }
-    if (positions?.windowY != null) globalThis.scrollTo?.(positions.windowX || 0, positions.windowY);
-    requestAnimationFrame(() => {
-        for (const [node, top, left] of saved) {
-            node.scrollTop = top;
-            node.scrollLeft = left;
-        }
-        if (positions?.windowY != null) globalThis.scrollTo?.(positions.windowX || 0, positions.windowY);
-    });
-    setTimeout(() => {
-        for (const [node, top, left] of saved) { node.scrollTop = top; node.scrollLeft = left; }
-        if (positions?.windowY != null) globalThis.scrollTo?.(positions.windowX || 0, positions.windowY);
-    }, 120);
+function renderGroupSuggestions(selectedGroup) {
+    const groups = [...new Set(settings.accounts.map(account => account.group).filter(Boolean))]
+        .sort((a, b) => a.localeCompare(b));
+    const select = $('#sam-group');
+    if (!select) return;
+    const creating = selectedGroup === undefined && select.value === '__new__';
+    const current = selectedGroup ?? (creating ? '' : select.value);
+    select.replaceChildren(new Option('不分组', ''));
+    for (const group of groups) select.append(new Option(group, group));
+    select.append(new Option('新建分组…', '__new__'));
+    select.value = creating ? '__new__' : groups.includes(current) ? current : '';
+    const input = $('#sam-new-group');
+    if (input) input.hidden = select.value !== '__new__';
 }
 
 function filteredAccounts(accounts, filter) {
@@ -580,61 +565,18 @@ function filteredAccounts(accounts, filter) {
             || a.name.localeCompare(b.name));
 }
 
-function renderGroupTabs() {
-    const tabs = $('#sam-group-tabs');
-    if (!tabs) return;
-    const previousScroll = tabs.scrollLeft;
-    const focused = document.activeElement?.closest('.sam-group-tab');
-    const groups = [...new Set(settings.accounts.map(account => account.group))]
-        .sort((a, b) => (a || '未分组').localeCompare(b || '未分组'));
-    const filters = [
-        { type: 'favorites', label: '★ 收藏', count: settings.accounts.filter(account => account.favorite).length },
-        { type: 'all', label: '全部', count: settings.accounts.length },
-        ...groups.map(group => ({ type: 'group', group, label: group || '未分组',
-            count: settings.accounts.filter(account => account.group === group).length })),
-    ];
-    tabs.replaceChildren(...filters.map(filter => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'sam-group-tab';
-        button.dataset.filter = filter.type;
-        if (filter.type === 'group') button.dataset.group = filter.group;
-        button.textContent = `${filter.label} ${filter.count}`;
-        button.title = filter.type === 'favorites' ? '查看收藏的 API' : filter.type === 'all'
-            ? '查看全部 API' : `查看分组：${filter.label}`;
-        const selected = settings.accountFilter.type === filter.type
-            && (filter.type !== 'group' || settings.accountFilter.group === filter.group);
-        button.setAttribute('aria-pressed', String(selected));
-        return button;
-    }));
-    tabs.scrollLeft = previousScroll;
-    if (focused) {
-        const replacement = $$('.sam-group-tab', tabs).find(button => button.dataset.filter === focused.dataset.filter
-            && button.dataset.group === focused.dataset.group);
-        replacement?.focus({ preventScroll: true });
-    }
-}
-
 function renderAccounts() {
-    const validFilter = normalizeAccountFilter(settings.accountFilter, settings.accounts);
-    if (validFilter.type !== settings.accountFilter.type || validFilter.group !== settings.accountFilter.group) {
-        settings.accountFilter = validFilter;
-        persist();
-    }
     renderGroupSuggestions();
-    renderGroupTabs();
     updateFormBalance();
     if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
     const list = $('#sam-account-list');
     if (!list) return;
-    const accounts = filteredAccounts(settings.accounts, settings.accountFilter);
+    const accounts = filteredAccounts(settings.accounts, { type: 'all' });
     list.replaceChildren();
     if (!accounts.length) {
         const empty = document.createElement('div');
         empty.className = 'sam-empty';
-        empty.textContent = settings.accounts.length && settings.accountFilter.type === 'favorites'
-            ? '还没有收藏的 API，点击账户右上角的星标即可置顶。'
-            : '还没有保存的 API，在下方填写信息即可添加。';
+        empty.textContent = '还没有保存的 API，在下方填写信息即可添加。';
         list.append(empty);
         return;
     }
@@ -655,10 +597,6 @@ function saveAccountFromForm(event) {
     if (index >= 0) settings.accounts[index] = normalizeAccount(account);
     else settings.accounts.push(normalizeAccount(account));
     settings.selectedAccountId = account.id;
-    if ((settings.accountFilter.type === 'favorites' && !account.favorite)
-        || (settings.accountFilter.type === 'group' && settings.accountFilter.group !== account.group)) {
-        settings.accountFilter = { type: 'group', group: account.group };
-    }
     persist();
     renderAccounts();
     clearForm();
@@ -798,7 +736,7 @@ async function handleAccountAction(event) {
             persist();
             renderAccounts();
             ($$('.sam-favorite-button').find(item => item.dataset.accountId === account.id)
-                || $('.sam-group-tab[aria-pressed="true"]'))?.focus({ preventScroll: true });
+                || rootElement())?.focus({ preventScroll: true });
             break;
         case 'balance': await refreshBalance(account); break;
         case 'apply': await applyToSillyTavern(account); break;
@@ -853,16 +791,11 @@ function bindEvents() {
     });
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
-    $('#sam-group-tabs')?.addEventListener('click', event => {
-        const button = event.target.closest('button[data-filter]');
-        if (!button) return;
-        settings.accountFilter = normalizeAccountFilter({ type: button.dataset.filter, group: button.dataset.group }, settings.accounts);
-        persist();
-        renderAccounts();
-    });
-    $('#sam-group-select')?.addEventListener('change', event => {
-        const input = $('#sam-group');
-        if (input && event.target.value) input.value = event.target.value;
+    $('#sam-group')?.addEventListener('change', event => {
+        const input = $('#sam-new-group');
+        if (!input) return;
+        input.hidden = event.target.value !== '__new__';
+        if (!input.hidden) input.focus({ preventScroll: true });
     });
     $('#sam-auto-refresh')?.addEventListener('change', event => {
         settings.autoRefresh = Boolean(event.target.checked);
