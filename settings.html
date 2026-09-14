@@ -31,7 +31,10 @@
     <form id="sam-account-form" class="sam-form" autocomplete="off">
       <div class="sam-form-heading">
         <h4 id="sam-form-title">添加 API</h4>
-        <button id="sam-cancel-edit" class="menu_button sam-button sam-button-small" type="button" hidden>取消编辑</button>
+        <div class="sam-form-heading-actions">
+          <button id="sam-delete-account" class="menu_button sam-button sam-button-small sam-button-danger" type="button" hidden>删除账户</button>
+          <button id="sam-cancel-edit" class="menu_button sam-button sam-button-small" type="button" hidden>取消编辑</button>
+        </div>
       </div>
       <input id="sam-account-id" name="accountId" type="hidden" />
       <div class="sam-field-grid">
@@ -41,11 +44,8 @@
         </div>
         <div class="sam-field">
           <label for="sam-group">分组（可选）</label>
-          <select id="sam-group" name="group" class="text_pole sam-control">
-            <option value="">不分组</option>
-            <option value="__new__">新建分组…</option>
-          </select>
-          <input id="sam-new-group" class="text_pole sam-control sam-new-group" type="text" maxlength="60" placeholder="输入新分组名称" hidden />
+          <input id="sam-group" name="group" class="text_pole sam-control" type="text" list="sam-group-options" maxlength="60" placeholder="填写或选择分组" autocomplete="off" />
+          <datalist id="sam-group-options"></datalist>
         </div>
       </div>
 

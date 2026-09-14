@@ -8,11 +8,11 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.4.0';
-import { displayApiUrl, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.4.0';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.4.1';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.4.1';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.4.0';
+const EXTENSION_VERSION = '1.4.1';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 2;
 
@@ -200,9 +200,7 @@ function readForm() {
     return {
         id: accountId || makeId(),
         name: asString($('#sam-name')?.value).trim(),
-        group: $('#sam-group')?.value === '__new__'
-            ? asString($('#sam-new-group')?.value).trim()
-            : asString($('#sam-group')?.value).trim(),
+        group: asString($('#sam-group')?.value).trim(),
         favorite: existing?.favorite === true,
         provider: identifyProvider(baseUrl),
         baseUrl,
@@ -236,10 +234,8 @@ function clearForm() {
         modelSelect.append(option);
     }
     formModels = [];
-    if ($('#sam-new-group')) {
-        $('#sam-new-group').hidden = true;
-        $('#sam-new-group').value = '';
-    }
+    renderGroupSuggestions('');
+    if ($('#sam-delete-account')) $('#sam-delete-account').hidden = true;
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = true;
     if ($('#sam-save-account')) $('#sam-save-account').textContent = '保存 API';
     if ($('#sam-form-title')) $('#sam-form-title').textContent = '添加 API';
@@ -269,6 +265,7 @@ function fillForm(account) {
     formModels = [...account.models];
     populateModelSelect(formModels, account.selectedModel);
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = false;
+    if ($('#sam-delete-account')) $('#sam-delete-account').hidden = false;
     if ($('#sam-save-account')) $('#sam-save-account').textContent = '更新 API';
     if ($('#sam-form-title')) $('#sam-form-title').textContent = '编辑 API';
     if ($('#sam-api-key')) {
@@ -305,6 +302,15 @@ function resolveAccountEndpoint(account) {
         request: requestJson,
         nativeRequest: (baseUrl, apiKey) => requestNativeModels(baseUrl, apiKey, { getRequestHeaders }),
     });
+}
+
+async function requestBalanceJson(url, apiKey) {
+    try {
+        return await requestJson(url, apiKey, { proxy: false });
+    } catch (error) {
+        if (!error?.network) throw error;
+        return requestApiJsonViaSillyTavern(url, apiKey, { getRequestHeaders });
+    }
 }
 
 function invalidateDraftConnection() {
@@ -365,7 +371,7 @@ async function refreshBalance(account, options = {}) {
     // cannot reuse or be overwritten by an older request for the same account.
     query.promise = Promise.resolve().then(async () => {
         try {
-            const result = await queryBalance(snapshot);
+            const result = await queryBalance(snapshot, { request: requestBalanceJson });
             const current = currentAccount();
             if (!current) return null;
             current.balance = normalizeBalance({ ...result, status: 'ok', fetchedAt: Date.now() });
@@ -545,16 +551,17 @@ function createAccountCard(account) {
 function renderGroupSuggestions(selectedGroup) {
     const groups = [...new Set(settings.accounts.map(account => account.group).filter(Boolean))]
         .sort((a, b) => a.localeCompare(b));
-    const select = $('#sam-group');
-    if (!select) return;
-    const creating = selectedGroup === undefined && select.value === '__new__';
-    const current = selectedGroup ?? (creating ? '' : select.value);
-    select.replaceChildren(new Option('不分组', ''));
-    for (const group of groups) select.append(new Option(group, group));
-    select.append(new Option('新建分组…', '__new__'));
-    select.value = creating ? '__new__' : groups.includes(current) ? current : '';
-    const input = $('#sam-new-group');
-    if (input) input.hidden = select.value !== '__new__';
+    const input = $('#sam-group');
+    const options = $('#sam-group-options');
+    if (!input || !options) return;
+    const current = selectedGroup ?? input.value;
+    const entries = groups.map(group => {
+        const option = document.createElement('option');
+        option.value = group;
+        return option;
+    });
+    options.replaceChildren(...entries);
+    input.value = current;
 }
 
 function filteredAccounts(accounts, filter) {
@@ -621,6 +628,12 @@ function deleteAccount(account) {
     if ($('#sam-account-id')?.value === account.id) clearForm();
     renderAccounts();
     notify('账户已删除。', 'success');
+}
+
+function deleteEditedAccount() {
+    const id = asString($('#sam-account-id')?.value);
+    const account = settings.accounts.find(item => item.id === id);
+    if (account) deleteAccount(account);
 }
 
 function findConnectionInput(selectors) {
@@ -759,6 +772,7 @@ function bindEvents() {
     const form = $('#sam-account-form');
     form?.addEventListener('submit', saveAccountFromForm);
     $('#sam-cancel-edit')?.addEventListener('click', clearForm);
+    $('#sam-delete-account')?.addEventListener('click', deleteEditedAccount);
     $('#sam-fetch-models')?.addEventListener('click', fetchModelsForDraft);
     for (const selector of ['#sam-base-url', '#sam-api-key']) {
         $(selector)?.addEventListener('input', invalidateDraftConnection);
@@ -791,12 +805,6 @@ function bindEvents() {
     });
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
-    $('#sam-group')?.addEventListener('change', event => {
-        const input = $('#sam-new-group');
-        if (!input) return;
-        input.hidden = event.target.value !== '__new__';
-        if (!input.hidden) input.focus({ preventScroll: true });
-    });
     $('#sam-auto-refresh')?.addEventListener('change', event => {
         settings.autoRefresh = Boolean(event.target.checked);
         persist();
