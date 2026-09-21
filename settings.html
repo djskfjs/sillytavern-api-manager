@@ -13,6 +13,10 @@
     <div class="sam-list-tools">
       <button id="sam-refresh-all" class="menu_button sam-button sam-button-small" type="button">刷新全部余额</button>
     </div>
+    <div class="sam-polling-tools">
+      <span id="sam-current-group" class="sam-muted">当前分组：未选择</span>
+      <button id="sam-toggle-polling" class="menu_button sam-button sam-button-small" type="button" aria-pressed="false" disabled>开启当前分组轮询</button>
+    </div>
     <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
       <div class="sam-empty">还没有保存的 API，在下方填写信息即可添加。</div>
     </div>
@@ -24,6 +28,11 @@
       <div class="sam-interval-row">
         <label for="sam-refresh-interval">每</label>
         <input id="sam-refresh-interval" class="text_pole sam-control sam-number" type="number" min="1" max="1440" step="1" value="30" inputmode="numeric" aria-label="余额刷新间隔（分钟）" />
+        <span>分钟</span>
+      </div>
+      <div class="sam-interval-row">
+        <label for="sam-polling-interval">轮询间隔</label>
+        <input id="sam-polling-interval" class="text_pole sam-control sam-number" type="number" min="1" max="1440" step="1" value="5" inputmode="numeric" aria-label="账户轮询间隔（分钟）" />
         <span>分钟</span>
       </div>
     </div>

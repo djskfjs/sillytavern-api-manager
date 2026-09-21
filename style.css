@@ -86,7 +86,10 @@
   border-radius: 0.4em;
   background: color-mix(in srgb, var(--sam-text) 4%, transparent);
 }
-#st-api-account-manager .sam-account-item.sam-selected { border-color: var(--sam-accent); }
+#st-api-account-manager .sam-account-item.sam-selected {
+  border-color: var(--sam-accent);
+  background: color-mix(in srgb, var(--sam-accent) 10%, transparent);
+}
 #st-api-account-manager .sam-account-main { display: flex; align-items: start; justify-content: space-between; gap: 0.4em; }
 #st-api-account-manager .sam-account-name { font-weight: 600; overflow-wrap: anywhere; }
 #st-api-account-manager .sam-account-group { color: var(--sam-accent); font-size: 0.78em; overflow-wrap: anywhere; }
@@ -96,6 +99,14 @@
 #st-api-account-manager .sam-account-balance { flex: 1; min-width: 0; color: var(--sam-text); font-size: 0.85em; overflow-wrap: anywhere; }
 #st-api-account-manager .sam-account-balance[data-state="error"] { text-decoration: underline dotted var(--sam-accent); }
 #st-api-account-manager .sam-account-actions { display: flex; flex-wrap: wrap; gap: 0.3em; margin-top: 0.4em; }
+#st-api-account-manager .sam-polling-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.4em;
+  margin-bottom: 0.55em;
+}
 #st-api-account-manager .sam-refresh-settings { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5em; margin-top: 0.65em; font-size: 0.8em; }
 #st-api-account-manager :where(.sam-check-row, .sam-interval-row) { display: inline-flex; align-items: center; gap: 0.35em; }
 #st-api-account-manager .sam-check-row input { accent-color: var(--sam-accent); }

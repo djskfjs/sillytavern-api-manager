@@ -8,11 +8,11 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.4.1';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.4.1';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.5.0';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.5.0';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.4.1';
+const EXTENSION_VERSION = '1.5.0';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 2;
 
@@ -23,10 +23,13 @@ const DEFAULT_SETTINGS = Object.freeze({
     accountFilter: { type: 'all' },
     autoRefresh: true,
     refreshInterval: 30,
+    pollingEnabled: false,
+    pollingInterval: 5,
 });
 
 let settings;
 let refreshTimer = null;
+let pollingTimer = null;
 let formModels = [];
 let formResolvedConnection = null;
 let formConnectionRevision = 0;
@@ -151,6 +154,8 @@ function normalizeSettings(raw) {
         accountFilter: normalizeAccountFilter(source.accountFilter, accounts),
         autoRefresh: source.autoRefresh !== false,
         refreshInterval: clampInteger(source.refreshInterval, 1, 1440, DEFAULT_SETTINGS.refreshInterval),
+        pollingEnabled: source.pollingEnabled === true,
+        pollingInterval: clampInteger(source.pollingInterval, 1, 1440, DEFAULT_SETTINGS.pollingInterval),
     };
 }
 
@@ -528,7 +533,9 @@ function createAccountCard(account) {
 
     const actions = document.createElement('div');
     actions.className = 'sam-account-actions';
+    const selected = account.id === settings.selectedAccountId;
     const actionDefinitions = [
+        ['select', selected ? '已选中' : '选中', selected ? '当前选中的账户' : '设为当前账户'],
         ['edit', '编辑', '编辑账户'],
         ['apply', '应用', '应用并连接此 API'],
         ['delete', '删除', '删除账户'],
@@ -536,11 +543,13 @@ function createAccountCard(account) {
     for (const [action, label, titleText] of actionDefinitions) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `menu_button sam-button ${action === 'delete' ? 'sam-button-quiet' : 'sam-button-secondary'}`;
+        button.className = `menu_button sam-button ${action === 'delete' ? 'sam-button-quiet'
+            : action === 'select' && selected ? 'sam-button-primary' : 'sam-button-secondary'}`;
         button.dataset.action = action;
         button.dataset.accountId = account.id;
         button.title = titleText;
         button.textContent = label;
+        if (action === 'select') button.setAttribute('aria-pressed', String(selected));
         if (action === 'apply') button.disabled = isApplyingAccount;
         actions.append(button);
     }
@@ -572,8 +581,46 @@ function filteredAccounts(accounts, filter) {
             || a.name.localeCompare(b.name));
 }
 
+function selectedAccount() {
+    return settings.accounts.find(account => account.id === settings.selectedAccountId);
+}
+
+function currentPollingGroup() {
+    return selectedAccount()?.group;
+}
+
+function pollingAccounts(group = currentPollingGroup()) {
+    if (group === undefined) return [];
+    return filteredAccounts(settings.accounts, { type: 'group', group });
+}
+
+function nextPollingAccount(group = currentPollingGroup()) {
+    const accounts = pollingAccounts(group);
+    if (!accounts.length) return null;
+    const currentIndex = accounts.findIndex(account => account.id === settings.selectedAccountId);
+    return accounts[(currentIndex + 1 + accounts.length) % accounts.length];
+}
+
+function updatePollingUi() {
+    const group = currentPollingGroup();
+    const accounts = pollingAccounts(group);
+    const label = $('#sam-current-group');
+    if (label) label.textContent = group === undefined
+        ? '当前分组：未选择'
+        : `当前分组：${group || '未分组'}（${accounts.length} 个）`;
+    const button = $('#sam-toggle-polling');
+    if (button) {
+        button.disabled = accounts.length < 2;
+        button.title = accounts.length < 2 ? '当前分组至少需要两个账户' : '按设定间隔循环应用当前分组中的账户';
+        button.textContent = settings.pollingEnabled ? '停止当前分组轮询' : '开启当前分组轮询';
+        button.setAttribute('aria-pressed', String(settings.pollingEnabled));
+        button.classList.toggle('sam-button-primary', settings.pollingEnabled);
+    }
+}
+
 function renderAccounts() {
     renderGroupSuggestions();
+    updatePollingUi();
     updateFormBalance();
     if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
     const list = $('#sam-account-list');
@@ -607,14 +654,20 @@ function saveAccountFromForm(event) {
     persist();
     renderAccounts();
     clearForm();
+    restartPollingTimer();
     notify(index >= 0 ? '账户已更新。' : '账户已保存。', 'success');
 }
 
 function editAccount(account) {
+    fillForm(account);
+}
+
+function selectAccount(account, options = {}) {
     settings.selectedAccountId = account.id;
     persist();
-    fillForm(account);
     renderAccounts();
+    if (options.restartPolling !== false) restartPollingTimer();
+    if (!options.silent) notify(`已选中：${account.name}`, 'success');
 }
 
 function deleteAccount(account) {
@@ -623,10 +676,14 @@ function deleteAccount(account) {
         : true;
     if (!confirmed) return;
     settings.accounts = settings.accounts.filter(item => item.id !== account.id);
-    if (settings.selectedAccountId === account.id) settings.selectedAccountId = '';
+    if (settings.selectedAccountId === account.id) {
+        settings.selectedAccountId = '';
+        settings.pollingEnabled = false;
+    }
     persist();
     if ($('#sam-account-id')?.value === account.id) clearForm();
     renderAccounts();
+    restartPollingTimer();
     notify('账户已删除。', 'success');
 }
 
@@ -738,9 +795,8 @@ async function handleAccountAction(event) {
     if (!button) return;
     const account = settings.accounts.find(item => item.id === button.dataset.accountId);
     if (!account) return;
-    settings.selectedAccountId = account.id;
-    persist();
     switch (button.dataset.action) {
+        case 'select': selectAccount(account); break;
         case 'edit': editAccount(account); break;
         case 'delete': deleteAccount(account); break;
         case 'favorite':
@@ -752,7 +808,10 @@ async function handleAccountAction(event) {
                 || rootElement())?.focus({ preventScroll: true });
             break;
         case 'balance': await refreshBalance(account); break;
-        case 'apply': await applyToSillyTavern(account); break;
+        case 'apply':
+            selectAccount(account, { silent: true });
+            await applyToSillyTavern(account);
+            break;
         default: break;
     }
 }
@@ -766,6 +825,59 @@ function restartRefreshTimer() {
         if (document.visibilityState === 'hidden') return;
         refreshAllBalances({ silent: true });
     }, intervalMs);
+}
+
+async function pollNextAccount() {
+    pollingTimer = null;
+    if (!settings.pollingEnabled) return;
+    if (document.visibilityState === 'hidden' || isApplyingAccount) {
+        restartPollingTimer();
+        return;
+    }
+    const next = nextPollingAccount();
+    if (!next) {
+        settings.pollingEnabled = false;
+        persist();
+        updatePollingUi();
+        return;
+    }
+    selectAccount(next, { silent: true, restartPolling: false });
+    try {
+        await applyToSillyTavern(next);
+    } finally {
+        restartPollingTimer();
+    }
+}
+
+function restartPollingTimer() {
+    if (pollingTimer) clearTimeout(pollingTimer);
+    pollingTimer = null;
+    const accounts = pollingAccounts();
+    if (settings.pollingEnabled && accounts.length < 2) {
+        settings.pollingEnabled = false;
+        persist();
+    }
+    updatePollingUi();
+    if (!settings.pollingEnabled) return;
+    pollingTimer = setTimeout(pollNextAccount, settings.pollingInterval * 60 * 1000);
+}
+
+function togglePolling() {
+    if (settings.pollingEnabled) {
+        settings.pollingEnabled = false;
+        persist();
+        restartPollingTimer();
+        notify('已停止当前分组轮询。');
+        return;
+    }
+    const group = currentPollingGroup();
+    const accounts = pollingAccounts(group);
+    if (group === undefined) return notify('请先选中一个账户。', 'error');
+    if (accounts.length < 2) return notify('当前分组至少需要两个账户才能轮询。', 'error');
+    settings.pollingEnabled = true;
+    persist();
+    restartPollingTimer();
+    notify(`已开启“${group || '未分组'}”轮询，每 ${settings.pollingInterval} 分钟切换一次。`, 'success');
 }
 
 function bindEvents() {
@@ -804,6 +916,7 @@ function bindEvents() {
         updateFormBalance();
     });
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
+    $('#sam-toggle-polling')?.addEventListener('click', togglePolling);
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
     $('#sam-auto-refresh')?.addEventListener('change', event => {
         settings.autoRefresh = Boolean(event.target.checked);
@@ -815,6 +928,12 @@ function bindEvents() {
         event.target.value = settings.refreshInterval;
         persist();
         restartRefreshTimer();
+    });
+    $('#sam-polling-interval')?.addEventListener('change', event => {
+        settings.pollingInterval = clampInteger(event.target.value, 1, 1440, DEFAULT_SETTINGS.pollingInterval);
+        event.target.value = settings.pollingInterval;
+        persist();
+        restartPollingTimer();
     });
     $('#sam-key-toggle')?.addEventListener('click', event => {
         const input = $('#sam-api-key');
@@ -830,13 +949,16 @@ function bindEvents() {
 function loadSettingsIntoUi() {
     const auto = $('#sam-auto-refresh');
     const interval = $('#sam-refresh-interval');
+    const pollingInterval = $('#sam-polling-interval');
     if (auto) auto.checked = settings.autoRefresh;
     if (interval) interval.value = settings.refreshInterval;
+    if (pollingInterval) pollingInterval.value = settings.pollingInterval;
     renderAccounts();
     if (settings.selectedAccountId) {
         const account = settings.accounts.find(item => item.id === settings.selectedAccountId);
         if (account) fillForm(account);
     }
+    restartPollingTimer();
 }
 
 async function loadPanel() {
