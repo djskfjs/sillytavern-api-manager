@@ -8,11 +8,11 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.5.0';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.5.0';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.6.0';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.6.0';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.5.0';
+const EXTENSION_VERSION = '1.6.0';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 2;
 
@@ -159,6 +159,26 @@ function normalizeSettings(raw) {
     };
 }
 
+function setButtonContent(button, iconClass, label) {
+    if (!button) return;
+    const icon = document.createElement('i');
+    icon.className = iconClass;
+    icon.setAttribute('aria-hidden', 'true');
+    const text = document.createElement('span');
+    text.textContent = label;
+    button.replaceChildren(icon, text);
+}
+
+function setKeyVisibility(visible) {
+    const input = $('#sam-api-key');
+    const button = $('#sam-key-toggle');
+    if (!input || !button) return;
+    input.type = visible ? 'text' : 'password';
+    setButtonContent(button, visible ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye', visible ? '隐藏' : '显示');
+    button.setAttribute('aria-label', visible ? '隐藏 API Key' : '显示 API Key');
+    button.setAttribute('aria-pressed', String(visible));
+}
+
 function persist() {
     extension_settings[EXTENSION_NAME] = settings;
     if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
@@ -242,12 +262,13 @@ function clearForm() {
     renderGroupSuggestions('');
     if ($('#sam-delete-account')) $('#sam-delete-account').hidden = true;
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = true;
-    if ($('#sam-save-account')) $('#sam-save-account').textContent = '保存 API';
+    setButtonContent($('#sam-save-account'), 'fa-solid fa-floppy-disk', '保存 API');
     if ($('#sam-form-title')) $('#sam-form-title').textContent = '添加 API';
     if ($('#sam-api-key')) {
         $('#sam-api-key').required = true;
         $('#sam-api-key').placeholder = 'sk-…';
     }
+    setKeyVisibility(false);
     updateFormBalance();
     setStatus('就绪');
 }
@@ -271,12 +292,13 @@ function fillForm(account) {
     populateModelSelect(formModels, account.selectedModel);
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = false;
     if ($('#sam-delete-account')) $('#sam-delete-account').hidden = false;
-    if ($('#sam-save-account')) $('#sam-save-account').textContent = '更新 API';
+    setButtonContent($('#sam-save-account'), 'fa-solid fa-floppy-disk', '更新 API');
     if ($('#sam-form-title')) $('#sam-form-title').textContent = '编辑 API';
     if ($('#sam-api-key')) {
         $('#sam-api-key').required = false;
         $('#sam-api-key').placeholder = account.apiKey ? '留空以保留当前 Key' : 'sk-…';
     }
+    setKeyVisibility(false);
     updateFormBalance();
     setStatus(`正在编辑：${account.name}`);
 }
@@ -341,7 +363,10 @@ async function fetchModelsForDraft() {
     };
     isLoadingModels = true;
     const button = $('#sam-fetch-models');
-    if (button) { button.disabled = true; button.textContent = '获取中…'; }
+    if (button) {
+        button.disabled = true;
+        setButtonContent(button, 'fa-solid fa-spinner fa-spin', '获取中…');
+    }
     setStatus('正在获取模型…');
     try {
         const result = await resolveAccountEndpoint(draft);
@@ -357,7 +382,10 @@ async function fetchModelsForDraft() {
         if (stillCurrent()) notify(error?.message || '获取模型失败。', 'error');
     } finally {
         isLoadingModels = false;
-        if (button) { button.disabled = false; button.textContent = '获取模型'; }
+        if (button) {
+            button.disabled = false;
+            setButtonContent(button, 'fa-solid fa-cloud-arrow-down', '获取模型');
+        }
     }
 }
 
@@ -446,7 +474,9 @@ function updateFormBalance() {
     const button = $('#sam-fetch-balance');
     if (button) {
         button.disabled = !account || account.balance?.status === 'loading';
-        button.textContent = account?.balance?.status === 'loading' ? '查询中…' : '查询余额';
+        setButtonContent(button,
+            account?.balance?.status === 'loading' ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-wallet',
+            account?.balance?.status === 'loading' ? '查询中…' : '查询余额');
     }
 }
 
@@ -461,7 +491,9 @@ function updateAccountBalanceUi(account) {
         const button = $('button[data-action="balance"]', card);
         if (button) {
             button.disabled = account.balance?.status === 'loading';
-            button.textContent = button.disabled ? '查询中…' : '刷新余额';
+            setButtonContent(button,
+                button.disabled ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-rotate',
+                button.disabled ? '查询中…' : '刷新余额');
         }
         const time = $('.sam-account-time', card);
         if (time) {
@@ -477,21 +509,30 @@ function createAccountCard(account) {
     item.className = 'sam-account-item';
     item.setAttribute('role', 'listitem');
     item.dataset.accountId = account.id;
-    if (account.id === settings.selectedAccountId) item.classList.add('sam-selected');
+    const selected = account.id === settings.selectedAccountId;
+    if (selected) item.classList.add('sam-selected');
     if (account.favorite) item.classList.add('sam-favorite');
 
     const main = document.createElement('div');
     main.className = 'sam-account-main';
     const titleWrap = document.createElement('div');
-    titleWrap.style.minWidth = '0';
+    titleWrap.className = 'sam-account-identity';
+    const titleLine = document.createElement('div');
+    titleLine.className = 'sam-account-title-line';
     const title = document.createElement('div');
     title.className = 'sam-account-name';
     title.textContent = account.name;
-    titleWrap.append(title);
+    titleLine.append(title);
+    if (selected) {
+        const current = document.createElement('span');
+        current.className = 'sam-current-badge';
+        current.textContent = '当前';
+        titleLine.append(current);
+    }
     const group = document.createElement('div');
     group.className = 'sam-account-group';
     group.textContent = account.group || '未分组';
-    titleWrap.append(group);
+    titleWrap.append(titleLine, group);
     const favorite = document.createElement('button');
     favorite.type = 'button';
     favorite.className = 'sam-favorite-button';
@@ -504,11 +545,18 @@ function createAccountCard(account) {
     main.append(titleWrap, favorite);
     item.append(main);
 
-    const url = document.createElement('div');
+    const meta = document.createElement('div');
+    meta.className = 'sam-account-meta';
+    const url = document.createElement('span');
     url.className = 'sam-account-url';
     url.title = displayApiUrl(account.baseUrl);
     url.textContent = displayApiUrl(account.baseUrl) || '未填写 API 地址';
-    item.append(url);
+    const model = document.createElement('span');
+    model.className = 'sam-account-model';
+    model.title = account.selectedModel || '未选择模型';
+    model.textContent = account.selectedModel || '未选择模型';
+    meta.append(url, model);
+    item.append(meta);
     const balanceRow = document.createElement('div');
     balanceRow.className = 'sam-balance-row';
     const balance = document.createElement('output');
@@ -520,7 +568,9 @@ function createAccountCard(account) {
     balanceButton.className = 'menu_button sam-button sam-button-small';
     balanceButton.dataset.action = 'balance';
     balanceButton.dataset.accountId = account.id;
-    balanceButton.textContent = account.balance?.status === 'loading' ? '查询中…' : '刷新余额';
+    setButtonContent(balanceButton,
+        account.balance?.status === 'loading' ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-rotate',
+        account.balance?.status === 'loading' ? '查询中…' : '刷新余额');
     balanceButton.disabled = account.balance?.status === 'loading';
     balanceButton.setAttribute('aria-label', `查询 ${account.name} 的余额`);
     balanceRow.append(balance, balanceButton);
@@ -533,14 +583,13 @@ function createAccountCard(account) {
 
     const actions = document.createElement('div');
     actions.className = 'sam-account-actions';
-    const selected = account.id === settings.selectedAccountId;
     const actionDefinitions = [
-        ['select', selected ? '已选中' : '选中', selected ? '当前选中的账户' : '设为当前账户'],
-        ['edit', '编辑', '编辑账户'],
-        ['apply', '应用', '应用并连接此 API'],
-        ['delete', '删除', '删除账户'],
+        ['select', 'fa-solid fa-circle-check', selected ? '已选中' : '选中', selected ? '当前选中的账户' : '设为当前账户'],
+        ['edit', 'fa-solid fa-pen', '编辑', '编辑账户'],
+        ['apply', 'fa-solid fa-plug', '应用', '应用并连接此 API'],
+        ['delete', 'fa-solid fa-trash-can', '删除', '删除账户'],
     ];
-    for (const [action, label, titleText] of actionDefinitions) {
+    for (const [action, iconClass, label, titleText] of actionDefinitions) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = `menu_button sam-button ${action === 'delete' ? 'sam-button-quiet'
@@ -548,7 +597,7 @@ function createAccountCard(account) {
         button.dataset.action = action;
         button.dataset.accountId = account.id;
         button.title = titleText;
-        button.textContent = label;
+        setButtonContent(button, iconClass, label);
         if (action === 'select') button.setAttribute('aria-pressed', String(selected));
         if (action === 'apply') button.disabled = isApplyingAccount;
         actions.append(button);
@@ -557,9 +606,33 @@ function createAccountCard(account) {
     return item;
 }
 
+function savedGroups({ includeUngrouped = false } = {}) {
+    return [...new Set(settings.accounts.map(account => account.group).filter(group => includeUngrouped || Boolean(group)))]
+        .sort((a, b) => (a || '未分组').localeCompare(b || '未分组'));
+}
+
+function groupOptionValue(group) {
+    return `group:${encodeURIComponent(group)}`;
+}
+
+function groupFromOptionValue(value) {
+    if (!asString(value).startsWith('group:')) return undefined;
+    try {
+        return decodeURIComponent(value.slice(6));
+    } catch {
+        return undefined;
+    }
+}
+
+function createOption(label, value) {
+    const option = document.createElement('option');
+    option.textContent = label;
+    option.value = value;
+    return option;
+}
+
 function renderGroupSuggestions(selectedGroup) {
-    const groups = [...new Set(settings.accounts.map(account => account.group).filter(Boolean))]
-        .sort((a, b) => a.localeCompare(b));
+    const groups = savedGroups();
     const input = $('#sam-group');
     const options = $('#sam-group-options');
     if (!input || !options) return;
@@ -571,6 +644,15 @@ function renderGroupSuggestions(selectedGroup) {
     });
     options.replaceChildren(...entries);
     input.value = current;
+
+    const picker = $('#sam-group-select');
+    if (!picker) return;
+    const placeholder = createOption('选择已有分组', '');
+    const ungrouped = createOption('未分组', groupOptionValue(''));
+    picker.replaceChildren(placeholder, ungrouped,
+        ...groups.map(group => createOption(group, groupOptionValue(group))));
+    picker.value = settings.accounts.some(account => account.group === current)
+        ? groupOptionValue(current) : '';
 }
 
 function filteredAccounts(accounts, filter) {
@@ -579,6 +661,29 @@ function filteredAccounts(accounts, filter) {
         .sort((a, b) => Number(b.favorite) - Number(a.favorite)
             || (a.group || '未分组').localeCompare(b.group || '未分组')
             || a.name.localeCompare(b.name));
+}
+
+function renderAccountFilters() {
+    const favoritesButton = $('#sam-filter-favorites');
+    const allButton = $('#sam-filter-all');
+    const groupSelect = $('#sam-group-filter');
+    if (!favoritesButton || !allButton || !groupSelect) return;
+
+    setButtonContent(favoritesButton, 'fa-solid fa-star',
+        `收藏 ${settings.accounts.filter(account => account.favorite).length}`);
+    setButtonContent(allButton, 'fa-solid fa-layer-group', `全部 ${settings.accounts.length}`);
+    favoritesButton.setAttribute('aria-pressed', String(settings.accountFilter.type === 'favorites'));
+    allButton.setAttribute('aria-pressed', String(settings.accountFilter.type === 'all'));
+
+    const placeholder = createOption('选择分组', '');
+    const options = savedGroups({ includeUngrouped: true }).map(group => {
+        const count = settings.accounts.filter(account => account.group === group).length;
+        return createOption(`${group || '未分组'} ${count}`, groupOptionValue(group));
+    });
+    groupSelect.replaceChildren(placeholder, ...options);
+    groupSelect.value = settings.accountFilter.type === 'group'
+        ? groupOptionValue(settings.accountFilter.group) : '';
+    groupSelect.parentElement?.classList.toggle('sam-active', settings.accountFilter.type === 'group');
 }
 
 function selectedAccount() {
@@ -606,31 +711,41 @@ function updatePollingUi() {
     const accounts = pollingAccounts(group);
     const label = $('#sam-current-group');
     if (label) label.textContent = group === undefined
-        ? '当前分组：未选择'
-        : `当前分组：${group || '未分组'}（${accounts.length} 个）`;
+        ? '轮询分组：未选择'
+        : `轮询分组：${group || '未分组'} · ${accounts.length} 个账户`;
     const button = $('#sam-toggle-polling');
     if (button) {
         button.disabled = accounts.length < 2;
         button.title = accounts.length < 2 ? '当前分组至少需要两个账户' : '按设定间隔循环应用当前分组中的账户';
-        button.textContent = settings.pollingEnabled ? '停止当前分组轮询' : '开启当前分组轮询';
+        setButtonContent(button,
+            settings.pollingEnabled ? 'fa-solid fa-stop' : 'fa-solid fa-shuffle',
+            settings.pollingEnabled ? '停止轮询' : '开启轮询');
         button.setAttribute('aria-pressed', String(settings.pollingEnabled));
         button.classList.toggle('sam-button-primary', settings.pollingEnabled);
     }
 }
 
 function renderAccounts() {
+    const validFilter = normalizeAccountFilter(settings.accountFilter, settings.accounts);
+    if (validFilter.type !== settings.accountFilter.type || validFilter.group !== settings.accountFilter.group) {
+        settings.accountFilter = validFilter;
+        persist();
+    }
     renderGroupSuggestions();
+    renderAccountFilters();
     updatePollingUi();
     updateFormBalance();
     if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
     const list = $('#sam-account-list');
     if (!list) return;
-    const accounts = filteredAccounts(settings.accounts, { type: 'all' });
+    const accounts = filteredAccounts(settings.accounts, settings.accountFilter);
     list.replaceChildren();
     if (!accounts.length) {
         const empty = document.createElement('div');
         empty.className = 'sam-empty';
-        empty.textContent = '还没有保存的 API，在下方填写信息即可添加。';
+        empty.textContent = settings.accounts.length && settings.accountFilter.type === 'favorites'
+            ? '还没有收藏的 API。'
+            : '还没有保存的 API。';
         list.append(empty);
         return;
     }
@@ -651,6 +766,10 @@ function saveAccountFromForm(event) {
     if (index >= 0) settings.accounts[index] = normalizeAccount(account);
     else settings.accounts.push(normalizeAccount(account));
     settings.selectedAccountId = account.id;
+    if ((settings.accountFilter.type === 'favorites' && !account.favorite)
+        || (settings.accountFilter.type === 'group' && settings.accountFilter.group !== account.group)) {
+        settings.accountFilter = { type: 'group', group: account.group };
+    }
     persist();
     renderAccounts();
     clearForm();
@@ -805,6 +924,7 @@ async function handleAccountAction(event) {
             persist();
             renderAccounts();
             ($$('.sam-favorite-button').find(item => item.dataset.accountId === account.id)
+                || $('.sam-filter-button[aria-pressed="true"]')
                 || rootElement())?.focus({ preventScroll: true });
             break;
         case 'balance': await refreshBalance(account); break;
@@ -918,6 +1038,33 @@ function bindEvents() {
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
     $('#sam-toggle-polling')?.addEventListener('click', togglePolling);
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
+    $('#sam-account-filters')?.addEventListener('click', event => {
+        const button = event.target.closest('button[data-filter]');
+        if (!button) return;
+        settings.accountFilter = normalizeAccountFilter({ type: button.dataset.filter }, settings.accounts);
+        persist();
+        renderAccounts();
+    });
+    $('#sam-group-filter')?.addEventListener('change', event => {
+        const group = groupFromOptionValue(event.target.value);
+        settings.accountFilter = group === undefined
+            ? { type: 'all' }
+            : normalizeAccountFilter({ type: 'group', group }, settings.accounts);
+        persist();
+        renderAccounts();
+    });
+    $('#sam-group-select')?.addEventListener('change', event => {
+        const group = groupFromOptionValue(event.target.value);
+        const input = $('#sam-group');
+        if (input && group !== undefined) input.value = group;
+    });
+    $('#sam-group')?.addEventListener('input', event => {
+        const picker = $('#sam-group-select');
+        if (!picker) return;
+        const group = asString(event.target.value).trim();
+        picker.value = settings.accounts.some(account => account.group === group)
+            ? groupOptionValue(group) : '';
+    });
     $('#sam-auto-refresh')?.addEventListener('change', event => {
         settings.autoRefresh = Boolean(event.target.checked);
         persist();
@@ -939,10 +1086,7 @@ function bindEvents() {
         const input = $('#sam-api-key');
         if (!input) return;
         const visible = input.type === 'text';
-        input.type = visible ? 'password' : 'text';
-        event.currentTarget.textContent = visible ? '显示' : '隐藏';
-        event.currentTarget.setAttribute('aria-label', visible ? '显示 API Key' : '隐藏 API Key');
-        event.currentTarget.setAttribute('aria-pressed', String(!visible));
+        setKeyVisibility(!visible);
     });
 }
 
