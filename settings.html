@@ -9,7 +9,7 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.6.0</span>
+        <span>v1.7.0</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
@@ -23,14 +23,12 @@
             <i class="fa-solid fa-star" aria-hidden="true"></i><span>收藏 0</span>
           </button>
           <button id="sam-filter-all" class="sam-filter-button" type="button" data-filter="all" aria-pressed="true">
-            <i class="fa-solid fa-layer-group" aria-hidden="true"></i><span>全部 0</span>
+            <span>全部 0</span>
           </button>
           <label class="sam-group-filter" title="按分组筛选账户">
-            <i class="fa-solid fa-folder-tree" aria-hidden="true"></i>
             <select id="sam-group-filter" aria-label="选择账户分组">
               <option value="">选择分组</option>
             </select>
-            <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
           </label>
         </div>
         <button id="sam-refresh-all" class="menu_button sam-icon-button" type="button" aria-label="刷新全部余额" title="刷新全部余额">
@@ -41,7 +39,7 @@
       <div class="sam-polling-tools">
         <span class="sam-runtime-state">
           <span class="sam-status-dot" aria-hidden="true"></span>
-          <span id="sam-current-group">轮询分组：未选择</span>
+          <span id="sam-current-group">轮询范围：未选择</span>
         </span>
         <button id="sam-toggle-polling" class="menu_button sam-button sam-button-small" type="button" aria-pressed="false" disabled>
           <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启轮询</span>
@@ -71,9 +69,13 @@
       </div>
     </section>
 
-    <form id="sam-account-form" class="sam-form" autocomplete="off">
-      <div class="sam-form-heading">
-        <h4 id="sam-form-title">添加 API</h4>
+    <details id="sam-editor" class="sam-editor" open>
+      <summary class="sam-editor-summary">
+        <span id="sam-form-title">添加 API</span>
+        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+      </summary>
+
+      <form id="sam-account-form" class="sam-form" autocomplete="off">
         <div class="sam-form-heading-actions">
           <button id="sam-delete-account" class="menu_button sam-icon-button sam-button-danger" type="button" aria-label="删除账户" title="删除账户" hidden>
             <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
@@ -82,8 +84,7 @@
             <i class="fa-solid fa-xmark" aria-hidden="true"></i>
           </button>
         </div>
-      </div>
-      <input id="sam-account-id" name="accountId" type="hidden" />
+        <input id="sam-account-id" name="accountId" type="hidden" />
 
       <div class="sam-field-grid">
         <div class="sam-field">
@@ -137,12 +138,13 @@
         </button>
       </div>
 
-      <div class="sam-form-actions">
-        <button id="sam-save-account" class="menu_button sam-button sam-button-primary" type="submit">
-          <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span>保存 API</span>
-        </button>
-      </div>
-    </form>
+        <div class="sam-form-actions">
+          <button id="sam-save-account" class="menu_button sam-button sam-button-primary" type="submit">
+            <i class="fa-solid fa-floppy-disk" aria-hidden="true"></i><span>保存 API</span>
+          </button>
+        </div>
+      </form>
+    </details>
 
     <p id="sam-status" class="sam-status" role="status" aria-live="polite">就绪</p>
   </div>

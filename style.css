@@ -8,8 +8,8 @@
   --sam-subtle: color-mix(in srgb, var(--sam-text) 6%, transparent);
   --sam-subtle-strong: color-mix(in srgb, var(--sam-text) 10%, transparent);
   --sam-active: color-mix(in srgb, var(--sam-accent) 16%, transparent);
-  --sam-success: #42b883;
-  --sam-danger: #e96b73;
+  --sam-success: color-mix(in srgb, #42b883 55%, var(--sam-text));
+  --sam-danger: color-mix(in srgb, #e96b73 55%, var(--sam-text));
   box-sizing: border-box;
   container-type: inline-size;
   width: 100%;
@@ -134,10 +134,8 @@
 
 #st-api-account-manager .sam-group-filter {
   position: relative;
-  display: grid;
-  grid-template-columns: 1rem minmax(0, 1fr) 0.75rem;
+  display: block;
   align-items: center;
-  gap: 0.35em;
   min-width: 0;
   min-height: 2.3rem;
   padding: 0 0.55em;
@@ -149,8 +147,8 @@
   color: var(--sam-accent);
 }
 #st-api-account-manager .sam-group-filter:focus-within {
-  outline: 2px solid var(--sam-accent);
-  outline-offset: 2px;
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--sam-accent);
 }
 #st-api-account-manager .sam-group-filter select {
   width: 100%;
@@ -161,14 +159,12 @@
   overflow: hidden;
   border: 0;
   outline: 0;
-  appearance: none;
   background: transparent;
   color: inherit;
   font-size: 0.78em;
   text-overflow: ellipsis;
   cursor: pointer;
 }
-#st-api-account-manager .sam-group-filter > i:last-child { pointer-events: none; font-size: 0.68em; }
 
 #st-api-account-manager .sam-icon-button {
   display: inline-flex;
@@ -337,7 +333,7 @@
 }
 #st-api-account-manager .sam-account-actions {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.3em;
   margin-top: 0.55em;
 }
@@ -463,12 +459,36 @@
   outline-offset: 2px;
 }
 
-#st-api-account-manager .sam-form {
+#st-api-account-manager .sam-editor {
   margin-top: 0.25em;
-  padding-top: 0.8em;
   border-top: 1px solid var(--sam-border);
 }
-#st-api-account-manager .sam-form-heading,
+#st-api-account-manager .sam-editor-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55em;
+  min-height: 2.85rem;
+  padding: 0.55em 0.1em;
+  color: var(--sam-text);
+  font-size: 0.9em;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+#st-api-account-manager .sam-editor-summary::-webkit-details-marker { display: none; }
+#st-api-account-manager .sam-editor-summary::marker { content: ''; }
+#st-api-account-manager .sam-editor-summary > i {
+  color: var(--sam-muted);
+  font-size: 0.72em;
+  transition: transform 140ms ease;
+}
+#st-api-account-manager .sam-editor[open] > .sam-editor-summary > i { transform: rotate(180deg); }
+#st-api-account-manager .sam-form {
+  min-width: 0;
+  padding-top: 0.45em;
+}
 #st-api-account-manager .sam-label-row {
   display: flex;
   align-items: center;
@@ -476,9 +496,13 @@
   flex-wrap: wrap;
   gap: 0.45em;
 }
-#st-api-account-manager .sam-form-heading { margin-bottom: 0.7em; }
-#st-api-account-manager .sam-form-heading h4 { color: var(--sam-text); font-size: 0.92em; }
-#st-api-account-manager .sam-form-heading-actions { display: flex; gap: 0.35em; }
+#st-api-account-manager .sam-form-heading-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.35em;
+  margin-bottom: 0.55em;
+}
+#st-api-account-manager .sam-form-heading-actions:not(:has(button:not([hidden]))) { display: none; }
 #st-api-account-manager .sam-field-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
@@ -558,12 +582,12 @@
   }
   #st-api-account-manager .sam-field-grid,
   #st-api-account-manager .sam-group-editor { grid-template-columns: minmax(0, 1fr); }
-  #st-api-account-manager .sam-account-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   #st-api-account-manager .sam-account-meta { grid-template-columns: minmax(0, 1fr); gap: 0.15em; }
   #st-api-account-manager .sam-account-model { text-align: left; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   #st-api-account-manager .sam-header-chevron,
+  #st-api-account-manager .sam-editor-summary > i,
   #st-api-account-manager .sam-switch-track::after { transition: none; }
 }

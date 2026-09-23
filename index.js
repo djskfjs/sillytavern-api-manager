@@ -8,13 +8,13 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.6.0';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.6.0';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.7.0';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.7.0';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.6.0';
+const EXTENSION_VERSION = '1.7.0';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 
 const DEFAULT_SETTINGS = Object.freeze({
     version: SETTINGS_VERSION,
@@ -24,6 +24,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     autoRefresh: true,
     refreshInterval: 30,
     pollingEnabled: false,
+    pollingFilter: null,
+    pollingCursorId: '',
     pollingInterval: 5,
 });
 
@@ -135,6 +137,29 @@ function normalizeAccountFilter(filter, accounts) {
     return { type: 'all' };
 }
 
+function sameAppliedConnection(left, right) {
+    return Boolean(left && right)
+        && displayApiUrl(left.baseUrl) === displayApiUrl(right.baseUrl)
+        && savedApiEndpoint(left) === savedApiEndpoint(right)
+        && asString(left.apiKey) === asString(right.apiKey)
+        && asString(left.selectedModel) === asString(right.selectedModel);
+}
+
+function normalizePollingFilter(filter, accounts) {
+    if (filter?.type === 'favorites') return { type: 'favorites' };
+    if (filter?.type === 'group' && typeof filter.group === 'string'
+        && accounts.some(account => account.group === filter.group)) {
+        return { type: 'group', group: filter.group };
+    }
+    return null;
+}
+
+function accountMatchesFilter(account, filter) {
+    if (!account || !filter) return false;
+    return filter.type === 'favorites' ? account.favorite === true
+        : filter.type === 'group' ? account.group === filter.group : false;
+}
+
 function normalizeSettings(raw) {
     const source = raw && typeof raw === 'object' ? raw : {};
     const accounts = Array.isArray(source.accounts) ? source.accounts.map(normalizeAccount) : [];
@@ -144,28 +169,48 @@ function normalizeSettings(raw) {
         if (account.balance.status === 'loading') account.balance.status = 'unknown';
     }
     const selected = asString(source.selectedAccountId);
+    const selectedEntry = accounts.find(account => account.id === selected);
+    const pollingEnabled = source.pollingEnabled === true;
+    const legacyPollingFilter = selectedEntry ? { type: 'group', group: selectedEntry.group } : null;
+    const pollingFilter = pollingEnabled
+        ? normalizePollingFilter(source.pollingFilter, accounts)
+            || normalizePollingFilter(legacyPollingFilter, accounts)
+        : null;
+    const savedCursor = asString(source.pollingCursorId);
+    const pollingCursor = accounts.find(account => account.id === savedCursor)
+        || selectedEntry;
+    const pollingCursorId = pollingEnabled && accountMatchesFilter(pollingCursor, pollingFilter)
+        ? pollingCursor.id : '';
+    const selectedAccountId = Number(source.version) >= SETTINGS_VERSION
+        && selectedEntry ? selectedEntry.id : '';
     const { expandedGroups, ...retained } = source;
     return {
         ...DEFAULT_SETTINGS,
         ...retained,
         version: SETTINGS_VERSION,
         accounts,
-        selectedAccountId: accounts.some(account => account.id === selected) ? selected : '',
+        selectedAccountId,
         accountFilter: normalizeAccountFilter(source.accountFilter, accounts),
         autoRefresh: source.autoRefresh !== false,
         refreshInterval: clampInteger(source.refreshInterval, 1, 1440, DEFAULT_SETTINGS.refreshInterval),
-        pollingEnabled: source.pollingEnabled === true,
+        pollingEnabled: pollingEnabled && Boolean(pollingFilter),
+        pollingFilter,
+        pollingCursorId,
         pollingInterval: clampInteger(source.pollingInterval, 1, 1440, DEFAULT_SETTINGS.pollingInterval),
     };
 }
 
 function setButtonContent(button, iconClass, label) {
     if (!button) return;
+    const text = document.createElement('span');
+    text.textContent = label;
+    if (!iconClass) {
+        button.replaceChildren(text);
+        return;
+    }
     const icon = document.createElement('i');
     icon.className = iconClass;
     icon.setAttribute('aria-hidden', 'true');
-    const text = document.createElement('span');
-    text.textContent = label;
     button.replaceChildren(icon, text);
 }
 
@@ -271,10 +316,13 @@ function clearForm() {
     setKeyVisibility(false);
     updateFormBalance();
     setStatus('就绪');
+    $('.sam-editor-summary')?.focus({ preventScroll: true });
 }
 
 function fillForm(account) {
     if (!account) return;
+    const editor = $('#sam-editor');
+    if (editor) editor.open = true;
     formConnectionRevision++;
     formResolvedConnection = null;
     const values = {
@@ -510,7 +558,10 @@ function createAccountCard(account) {
     item.setAttribute('role', 'listitem');
     item.dataset.accountId = account.id;
     const selected = account.id === settings.selectedAccountId;
-    if (selected) item.classList.add('sam-selected');
+    if (selected) {
+        item.classList.add('sam-selected');
+        item.setAttribute('aria-current', 'true');
+    }
     if (account.favorite) item.classList.add('sam-favorite');
 
     const main = document.createElement('div');
@@ -584,21 +635,18 @@ function createAccountCard(account) {
     const actions = document.createElement('div');
     actions.className = 'sam-account-actions';
     const actionDefinitions = [
-        ['select', 'fa-solid fa-circle-check', selected ? '已选中' : '选中', selected ? '当前选中的账户' : '设为当前账户'],
         ['edit', 'fa-solid fa-pen', '编辑', '编辑账户'],
-        ['apply', 'fa-solid fa-plug', '应用', '应用并连接此 API'],
+        ['apply', 'fa-solid fa-plug', '应用', '设为当前账户并连接此 API'],
         ['delete', 'fa-solid fa-trash-can', '删除', '删除账户'],
     ];
     for (const [action, iconClass, label, titleText] of actionDefinitions) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `menu_button sam-button ${action === 'delete' ? 'sam-button-quiet'
-            : action === 'select' && selected ? 'sam-button-primary' : 'sam-button-secondary'}`;
+        button.className = `menu_button sam-button ${action === 'delete' ? 'sam-button-quiet' : 'sam-button-secondary'}`;
         button.dataset.action = action;
         button.dataset.accountId = account.id;
         button.title = titleText;
         setButtonContent(button, iconClass, label);
-        if (action === 'select') button.setAttribute('aria-pressed', String(selected));
         if (action === 'apply') button.disabled = isApplyingAccount;
         actions.append(button);
     }
@@ -656,8 +704,7 @@ function renderGroupSuggestions(selectedGroup) {
 }
 
 function filteredAccounts(accounts, filter) {
-    return accounts.filter(account => filter.type === 'favorites' ? account.favorite
-        : filter.type === 'group' ? account.group === filter.group : true)
+    return accounts.filter(account => filter.type === 'all' || accountMatchesFilter(account, filter))
         .sort((a, b) => Number(b.favorite) - Number(a.favorite)
             || (a.group || '未分组').localeCompare(b.group || '未分组')
             || a.name.localeCompare(b.name));
@@ -671,7 +718,7 @@ function renderAccountFilters() {
 
     setButtonContent(favoritesButton, 'fa-solid fa-star',
         `收藏 ${settings.accounts.filter(account => account.favorite).length}`);
-    setButtonContent(allButton, 'fa-solid fa-layer-group', `全部 ${settings.accounts.length}`);
+    setButtonContent(allButton, '', `全部 ${settings.accounts.length}`);
     favoritesButton.setAttribute('aria-pressed', String(settings.accountFilter.type === 'favorites'));
     allButton.setAttribute('aria-pressed', String(settings.accountFilter.type === 'all'));
 
@@ -690,33 +737,49 @@ function selectedAccount() {
     return settings.accounts.find(account => account.id === settings.selectedAccountId);
 }
 
-function currentPollingGroup() {
-    return selectedAccount()?.group;
+function suggestedPollingFilter() {
+    if (settings.accountFilter.type === 'favorites') return { type: 'favorites' };
+    if (settings.accountFilter.type === 'group') return { ...settings.accountFilter };
+    const account = selectedAccount();
+    return account ? { type: 'group', group: account.group } : null;
 }
 
-function pollingAccounts(group = currentPollingGroup()) {
-    if (group === undefined) return [];
-    return filteredAccounts(settings.accounts, { type: 'group', group });
+function currentPollingFilter() {
+    return settings.pollingEnabled
+        ? normalizePollingFilter(settings.pollingFilter, settings.accounts)
+        : normalizePollingFilter(suggestedPollingFilter(), settings.accounts);
 }
 
-function nextPollingAccount(group = currentPollingGroup()) {
-    const accounts = pollingAccounts(group);
+function pollingAccounts(filter = currentPollingFilter()) {
+    return filter ? filteredAccounts(settings.accounts, filter) : [];
+}
+
+function nextPollingAccount(filter = currentPollingFilter()) {
+    const accounts = pollingAccounts(filter);
     if (!accounts.length) return null;
-    const currentIndex = accounts.findIndex(account => account.id === settings.selectedAccountId);
+    const cursorId = settings.pollingEnabled ? settings.pollingCursorId : settings.selectedAccountId;
+    const currentIndex = accounts.findIndex(account => account.id === cursorId);
     return accounts[(currentIndex + 1 + accounts.length) % accounts.length];
 }
 
+function pollingFilterLabel(filter) {
+    if (!filter) return '';
+    return filter.type === 'favorites' ? '收藏' : (filter.group || '未分组');
+}
+
 function updatePollingUi() {
-    const group = currentPollingGroup();
-    const accounts = pollingAccounts(group);
+    const filter = currentPollingFilter();
+    const accounts = pollingAccounts(filter);
     const label = $('#sam-current-group');
-    if (label) label.textContent = group === undefined
-        ? '轮询分组：未选择'
-        : `轮询分组：${group || '未分组'} · ${accounts.length} 个账户`;
+    if (label) label.textContent = filter
+        ? `轮询范围：${pollingFilterLabel(filter)} · ${accounts.length} 个账户`
+        : '轮询范围：未选择';
     const button = $('#sam-toggle-polling');
     if (button) {
-        button.disabled = accounts.length < 2;
-        button.title = accounts.length < 2 ? '当前分组至少需要两个账户' : '按设定间隔循环应用当前分组中的账户';
+        button.disabled = !settings.pollingEnabled && accounts.length < 2;
+        button.title = accounts.length < 2
+            ? '当前轮询范围至少需要两个账户'
+            : `按设定间隔循环应用“${pollingFilterLabel(filter)}”中的账户`;
         setButtonContent(button,
             settings.pollingEnabled ? 'fa-solid fa-stop' : 'fa-solid fa-shuffle',
             settings.pollingEnabled ? '停止轮询' : '开启轮询');
@@ -763,9 +826,12 @@ function saveAccountFromForm(event) {
     if (!account.baseUrl || !isHttpUrl(account.baseUrl)) return notify('请填写有效的 API 基础地址。', 'error');
     if (!account.apiKey) return notify('请填写 API Key。', 'error');
     const index = settings.accounts.findIndex(item => item.id === account.id);
+    const existing = index >= 0 ? settings.accounts[index] : null;
+    const clearSelected = existing?.id === settings.selectedAccountId
+        && !sameAppliedConnection(existing, account);
     if (index >= 0) settings.accounts[index] = normalizeAccount(account);
     else settings.accounts.push(normalizeAccount(account));
-    settings.selectedAccountId = account.id;
+    if (clearSelected) settings.selectedAccountId = '';
     if ((settings.accountFilter.type === 'favorites' && !account.favorite)
         || (settings.accountFilter.type === 'group' && settings.accountFilter.group !== account.group)) {
         settings.accountFilter = { type: 'group', group: account.group };
@@ -781,12 +847,18 @@ function editAccount(account) {
     fillForm(account);
 }
 
-function selectAccount(account, options = {}) {
-    settings.selectedAccountId = account.id;
+function markSelectedAccount(account, options = {}) {
+    const current = settings.accounts.find(item => item.id === account.id);
+    if (!current) return false;
+    settings.selectedAccountId = current.id;
+    if (settings.pollingEnabled) {
+        const filter = normalizePollingFilter(settings.pollingFilter, settings.accounts);
+        settings.pollingCursorId = accountMatchesFilter(current, filter) ? current.id : '';
+    }
     persist();
     renderAccounts();
     if (options.restartPolling !== false) restartPollingTimer();
-    if (!options.silent) notify(`已选中：${account.name}`, 'success');
+    return true;
 }
 
 function deleteAccount(account) {
@@ -794,16 +866,24 @@ function deleteAccount(account) {
         ? globalThis.confirm(`确定删除账户“${account.name}”吗？API Key 也会从本地设置中移除。`)
         : true;
     if (!confirmed) return;
+    const visibleAccounts = filteredAccounts(settings.accounts, settings.accountFilter);
+    const visibleIndex = visibleAccounts.findIndex(item => item.id === account.id);
+    const focusAccountId = visibleAccounts[visibleIndex + 1]?.id
+        || visibleAccounts[visibleIndex - 1]?.id || '';
     settings.accounts = settings.accounts.filter(item => item.id !== account.id);
     if (settings.selectedAccountId === account.id) {
         settings.selectedAccountId = '';
-        settings.pollingEnabled = false;
     }
     persist();
     if ($('#sam-account-id')?.value === account.id) clearForm();
     renderAccounts();
     restartPollingTimer();
     notify('账户已删除。', 'success');
+    const focusCard = $$('.sam-account-item').find(item => item.dataset.accountId === focusAccountId);
+    const focusTarget = focusCard ? $('button[data-action="edit"]', focusCard)
+        : settings.accountFilter.type === 'group' ? $('#sam-group-filter')
+            : $('.sam-filter-button[aria-pressed="true"]');
+    (focusTarget || rootElement())?.focus({ preventScroll: true });
 }
 
 function deleteEditedAccount() {
@@ -828,10 +908,13 @@ function setConnectionValue(selectors, value) {
     return true;
 }
 
-async function applyToSillyTavern(account) {
-    if (isApplyingAccount) return;
+async function applyToSillyTavern(account, options = {}) {
+    if (isApplyingAccount) return false;
     const apiKey = asString(account.apiKey).trim();
-    if (!apiKey) return notify('请先填写并保存有效的 API Key。', 'error');
+    if (!apiKey) {
+        notify('请先填写并保存有效的 API Key。', 'error');
+        return false;
+    }
     const main = document.querySelector('#main_api');
     const source = document.querySelector('#chat_completion_source');
     const modelSelect = document.querySelector('#model_custom_select');
@@ -841,13 +924,14 @@ async function applyToSillyTavern(account) {
         || ![...main.options].some(option => option.value === 'openai')
         || ![...source.options].some(option => option.value === 'custom')) {
         notify('当前酒馆缺少自定义聊天补全控件，请检查酒馆版本。', 'error');
-        return;
+        return false;
     }
     isApplyingAccount = true;
     renderAccounts();
     const jq = globalThis.jQuery;
     let connectionStarted = false;
     let connectionResult;
+    let applied = false;
     const trackConnection = event => {
         connectionStarted = true;
         if (event.result?.then) connectionResult = event.result;
@@ -860,7 +944,7 @@ async function applyToSillyTavern(account) {
             const result = await resolveAccountEndpoint(snapshot);
             const current = settings.accounts.find(item => item.id === snapshot.id
                 && item.baseUrl === snapshot.baseUrl && item.apiKey === snapshot.apiKey);
-            if (!current) return;
+            if (!current) return false;
             baseUrl = result.baseUrl;
             current.baseUrl = displayApiUrl(baseUrl);
             current.resolvedBaseUrl = baseUrl;
@@ -888,6 +972,11 @@ async function applyToSillyTavern(account) {
         setConnectionValue(['#custom_api_url_text'], baseUrl);
         setConnectionValue(['#api_key_custom'], apiKey);
         setConnectionValue(['#custom_model_id'], model);
+        applied = markSelectedAccount(account, { restartPolling: options.restartPolling !== false });
+        if (!applied) {
+            notify('账户已被删除，未更新当前账户标识。', 'error');
+            return false;
+        }
         notify('已应用，正在连接…');
         if (sourceChanged) source.dispatchEvent(new Event('change', { bubbles: true }));
         if (mainChanged) main.dispatchEvent(new Event('change', { bubbles: true }));
@@ -907,6 +996,7 @@ async function applyToSillyTavern(account) {
         isApplyingAccount = false;
         renderAccounts();
     }
+    return applied;
 }
 
 async function handleAccountAction(event) {
@@ -915,7 +1005,6 @@ async function handleAccountAction(event) {
     const account = settings.accounts.find(item => item.id === button.dataset.accountId);
     if (!account) return;
     switch (button.dataset.action) {
-        case 'select': selectAccount(account); break;
         case 'edit': editAccount(account); break;
         case 'delete': deleteAccount(account); break;
         case 'favorite':
@@ -923,14 +1012,18 @@ async function handleAccountAction(event) {
             account.updatedAt = Date.now();
             persist();
             renderAccounts();
+            restartPollingTimer();
             ($$('.sam-favorite-button').find(item => item.dataset.accountId === account.id)
                 || $('.sam-filter-button[aria-pressed="true"]')
                 || rootElement())?.focus({ preventScroll: true });
             break;
         case 'balance': await refreshBalance(account); break;
         case 'apply':
-            selectAccount(account, { silent: true });
             await applyToSillyTavern(account);
+            {
+                const card = $$('.sam-account-item').find(item => item.dataset.accountId === account.id);
+                if (card) $('button[data-action="apply"]', card)?.focus({ preventScroll: true });
+            }
             break;
         default: break;
     }
@@ -957,13 +1050,16 @@ async function pollNextAccount() {
     const next = nextPollingAccount();
     if (!next) {
         settings.pollingEnabled = false;
+        settings.pollingFilter = null;
+        settings.pollingCursorId = '';
         persist();
         updatePollingUi();
         return;
     }
-    selectAccount(next, { silent: true, restartPolling: false });
+    settings.pollingCursorId = next.id;
+    persist();
     try {
-        await applyToSillyTavern(next);
+        await applyToSillyTavern(next, { restartPolling: false });
     } finally {
         restartPollingTimer();
     }
@@ -972,11 +1068,20 @@ async function pollNextAccount() {
 function restartPollingTimer() {
     if (pollingTimer) clearTimeout(pollingTimer);
     pollingTimer = null;
-    const accounts = pollingAccounts();
-    if (settings.pollingEnabled && accounts.length < 2) {
+    const filter = currentPollingFilter();
+    const accounts = pollingAccounts(filter);
+    let changed = false;
+    if (settings.pollingEnabled && (!filter || accounts.length < 2)) {
         settings.pollingEnabled = false;
-        persist();
+        settings.pollingFilter = null;
+        settings.pollingCursorId = '';
+        changed = true;
+    } else if (settings.pollingEnabled && settings.pollingCursorId
+        && !accounts.some(account => account.id === settings.pollingCursorId)) {
+        settings.pollingCursorId = '';
+        changed = true;
     }
+    if (changed) persist();
     updatePollingUi();
     if (!settings.pollingEnabled) return;
     pollingTimer = setTimeout(pollNextAccount, settings.pollingInterval * 60 * 1000);
@@ -985,19 +1090,24 @@ function restartPollingTimer() {
 function togglePolling() {
     if (settings.pollingEnabled) {
         settings.pollingEnabled = false;
+        settings.pollingFilter = null;
+        settings.pollingCursorId = '';
         persist();
         restartPollingTimer();
-        notify('已停止当前分组轮询。');
+        notify('已停止轮询。');
         return;
     }
-    const group = currentPollingGroup();
-    const accounts = pollingAccounts(group);
-    if (group === undefined) return notify('请先选中一个账户。', 'error');
-    if (accounts.length < 2) return notify('当前分组至少需要两个账户才能轮询。', 'error');
+    const filter = currentPollingFilter();
+    const accounts = pollingAccounts(filter);
+    if (!filter) return notify('请先选择收藏、具体分组，或应用一个账户。', 'error');
+    if (accounts.length < 2) return notify('当前轮询范围至少需要两个账户。', 'error');
     settings.pollingEnabled = true;
+    settings.pollingFilter = filter;
+    settings.pollingCursorId = accounts.some(account => account.id === settings.selectedAccountId)
+        ? settings.selectedAccountId : '';
     persist();
     restartPollingTimer();
-    notify(`已开启“${group || '未分组'}”轮询，每 ${settings.pollingInterval} 分钟切换一次。`, 'success');
+    notify(`已开启“${pollingFilterLabel(filter)}”轮询，每 ${settings.pollingInterval} 分钟切换一次。`, 'success');
 }
 
 function bindEvents() {
@@ -1020,6 +1130,8 @@ function bindEvents() {
             return;
         }
         const draft = readForm();
+        const clearSelected = account.id === settings.selectedAccountId
+            && !sameAppliedConnection(account, draft);
         Object.assign(account, {
             provider: draft.provider,
             baseUrl: draft.baseUrl,
@@ -1032,6 +1144,11 @@ function bindEvents() {
             balanceCurrency: draft.balanceCurrency,
             balanceParser: draft.balanceParser,
         });
+        if (clearSelected) {
+            settings.selectedAccountId = '';
+            persist();
+            renderAccounts();
+        }
         await refreshBalance(account);
         updateFormBalance();
     });
@@ -1098,10 +1215,6 @@ function loadSettingsIntoUi() {
     if (interval) interval.value = settings.refreshInterval;
     if (pollingInterval) pollingInterval.value = settings.pollingInterval;
     renderAccounts();
-    if (settings.selectedAccountId) {
-        const account = settings.accounts.find(item => item.id === settings.selectedAccountId);
-        if (account) fillForm(account);
-    }
     restartPollingTimer();
 }
 
