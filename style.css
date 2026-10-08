@@ -1,30 +1,40 @@
 /* SillyTavern-native account console. All rules stay scoped to the extension. */
 #st-api-account-manager {
   --sam-text: var(--SmartThemeBodyColor, CanvasText);
-  --sam-muted: var(--SmartThemeEmColor, var(--sam-text));
+  --sam-muted: color-mix(in srgb, var(--sam-text) 72%, var(--sam-surface));
   --sam-accent: var(--SmartThemeQuoteColor, var(--sam-text));
   --sam-surface: var(--SmartThemeBlurTintColor, Canvas);
-  --sam-border: var(--SmartThemeBorderColor, currentColor);
+  --sam-border: color-mix(in srgb, var(--sam-text) 27%, var(--sam-surface));
   --sam-subtle: color-mix(in srgb, var(--sam-text) 6%, transparent);
   --sam-subtle-strong: color-mix(in srgb, var(--sam-text) 10%, transparent);
-  --sam-active: color-mix(in srgb, var(--sam-accent) 16%, transparent);
+  --sam-active: color-mix(in srgb, var(--sam-accent) 18%, var(--sam-surface));
+  --sam-card: color-mix(in srgb, var(--sam-text) 7%, var(--sam-surface));
   --sam-success: color-mix(in srgb, #42b883 55%, var(--sam-text));
   --sam-danger: color-mix(in srgb, #e96b73 55%, var(--sam-text));
   box-sizing: border-box;
   container-type: inline-size;
   width: 100%;
   min-width: 0;
-  margin: 0.55em 0;
+  margin: 1em 0;
   padding: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--sam-accent) 40%, var(--sam-border));
-  border-radius: 0.45em;
-  background: color-mix(in srgb, var(--sam-surface) 96%, var(--sam-text) 4%);
-  box-shadow: 0 4px 14px color-mix(in srgb, #000 12%, transparent);
+  border: 1px solid var(--sam-border);
+  border-top: 3px solid var(--sam-accent);
+  border-radius: 12px;
+  background: var(--sam-surface);
+  box-shadow: 0 6px 20px #0002;
   color: var(--sam-text);
   font: inherit;
   line-height: 1.45;
   letter-spacing: 0;
+  text-shadow: none;
+}
+
+/* Keep wallpaper from washing out card boundaries in translucent themes. */
+@supports (color: rgb(from white r g b)) {
+  #st-api-account-manager {
+    --sam-surface: rgb(from var(--SmartThemeBlurTintColor, Canvas) r g b);
+  }
 }
 
 #st-api-account-manager *,
@@ -50,9 +60,9 @@
   grid-template-columns: 2.35rem minmax(0, 1fr) 1rem;
   align-items: center;
   gap: 0.65em;
-  min-height: 3.55rem;
-  padding: 0.6em 0.75em;
-  background: var(--sam-subtle);
+  min-height: 4rem;
+  padding: 0.85em;
+  background: var(--sam-card);
   cursor: pointer;
   list-style: none;
   user-select: none;
@@ -69,9 +79,11 @@
   width: 2.35rem;
   height: 2.35rem;
   border: 1px solid color-mix(in srgb, var(--sam-accent) 50%, var(--sam-border));
-  border-radius: 0.4em;
+  border-radius: 10px;
   background: var(--sam-active);
   color: var(--sam-accent);
+  font-size: 0.76em;
+  font-weight: 800;
 }
 #st-api-account-manager .sam-header-text {
   display: flex;
@@ -101,28 +113,45 @@
 }
 #st-api-account-manager[open] .sam-header-chevron { transform: rotate(180deg); }
 
-#st-api-account-manager .sam-content { min-width: 0; padding: 0.75em; }
+#st-api-account-manager .sam-content {
+  display: grid;
+  gap: 1em;
+  min-width: 0;
+  padding: 0.8em;
+}
+#st-api-account-manager .sam-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.3em 0.6em;
+  margin-bottom: 0.7em;
+}
+#st-api-account-manager .sam-section-heading h4 { color: var(--sam-text); font-size: 0.9em; font-weight: 700; }
+#st-api-account-manager .sam-section-heading > span { color: var(--sam-muted); font-size: 0.74em; }
+#st-api-account-manager .sam-account-section { min-width: 0; }
 #st-api-account-manager .sam-list-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 0.45em;
-  margin-bottom: 0.55em;
+  margin-bottom: 0.8em;
 }
 #st-api-account-manager .sam-list-toolbar-actions {
   display: flex;
   align-items: stretch;
   gap: 0.35em;
   min-width: 0;
+  justify-content: flex-end;
 }
 #st-api-account-manager .sam-account-filters {
   display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
+  grid-template-columns: 1fr 1fr;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--sam-border);
-  border-radius: 0.4em;
-  background: color-mix(in srgb, var(--sam-surface) 90%, transparent);
+  border-radius: 8px;
+  background: var(--sam-card);
 }
 #st-api-account-manager .sam-filter-button {
   display: inline-flex;
@@ -146,7 +175,9 @@
   background: var(--sam-active);
   color: var(--sam-accent);
   font-weight: 700;
+  box-shadow: inset 0 -3px var(--sam-accent);
 }
+#st-api-account-manager .sam-filter-button:nth-child(2) { border-right: 0; }
 #st-api-account-manager .sam-filter-button:hover { background: var(--sam-subtle); color: var(--sam-text); }
 
 #st-api-account-manager .sam-group-button-track {
@@ -171,8 +202,11 @@
   cursor: pointer;
 }
 #st-api-account-manager .sam-group-filter-buttons {
+  grid-column: 1 / -1;
   min-height: 2.3rem;
+  border-top: 1px solid var(--sam-border);
 }
+#st-api-account-manager .sam-group-filter-buttons:empty { display: none; }
 #st-api-account-manager .sam-group-filter-buttons > button {
   min-height: 2.3rem;
   padding: 0.42em 0.58em;
@@ -188,6 +222,7 @@
   background: var(--sam-active);
   color: var(--sam-accent);
   font-weight: 700;
+  box-shadow: inset 0 -3px var(--sam-accent);
 }
 #st-api-account-manager .sam-group-rename-editor {
   display: grid;
@@ -223,10 +258,14 @@
   flex-wrap: wrap;
   gap: 0.45em;
   min-height: 2.55rem;
-  margin-bottom: 0.55em;
-  padding: 0.45em 0;
-  border-top: 1px solid color-mix(in srgb, var(--sam-border) 70%, transparent);
-  border-bottom: 1px solid color-mix(in srgb, var(--sam-border) 70%, transparent);
+  padding: 0;
+}
+#st-api-account-manager .sam-failover-section {
+  min-width: 0;
+  padding: 0.8em;
+  border: 1px solid var(--sam-border);
+  border-radius: 10px;
+  background: var(--sam-card);
 }
 #st-api-account-manager .sam-runtime-state {
   display: inline-flex;
@@ -252,9 +291,10 @@
 
 #st-api-account-manager .sam-account-list {
   display: grid;
-  gap: 0.48em;
+  gap: 0.8em;
   min-width: 0;
-  max-height: 22rem;
+  max-height: 29rem;
+  padding: 2px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--sam-muted) transparent;
@@ -271,22 +311,24 @@
 #st-api-account-manager .sam-account-item {
   position: relative;
   min-width: 0;
-  padding: 0.65em;
+  padding: 0.85em;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--sam-border) 85%, transparent);
-  border-radius: 0.4em;
-  background: color-mix(in srgb, var(--sam-text) 3.5%, transparent);
+  border: 1px solid var(--sam-border);
+  border-radius: 10px;
+  background: var(--sam-card);
+  box-shadow: 0 2px 4px #0001;
 }
 #st-api-account-manager .sam-account-item::before {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 3px;
+  width: 4px;
   background: transparent;
   content: '';
 }
 #st-api-account-manager .sam-account-item.sam-selected {
-  border-color: color-mix(in srgb, var(--sam-accent) 65%, var(--sam-border));
-  background: color-mix(in srgb, var(--sam-accent) 7%, transparent);
+  border-color: var(--sam-accent);
+  background: color-mix(in srgb, var(--sam-accent) 9%, var(--sam-card));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--sam-accent) 30%, transparent);
 }
 #st-api-account-manager .sam-account-item.sam-selected::before { background: var(--sam-accent); }
 #st-api-account-manager .sam-account-main {
@@ -312,23 +354,27 @@
 }
 #st-api-account-manager .sam-current-badge {
   flex: 0 0 auto;
+  padding: 0.18em 0.55em;
+  border: 1px solid color-mix(in srgb, var(--sam-accent) 55%, var(--sam-border));
+  border-radius: 5px;
+  background: var(--sam-active);
   color: var(--sam-accent);
   font-size: 0.68em;
   font-weight: 700;
 }
 #st-api-account-manager .sam-account-group {
-  margin-top: 0.08em;
+  margin-top: 0.3em;
   color: var(--sam-muted);
   font-size: 0.72em;
   overflow-wrap: anywhere;
 }
 #st-api-account-manager .sam-account-meta {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.75fr);
-  gap: 0.65em;
-  margin-top: 0.45em;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.4em;
+  margin-top: 0.65em;
   color: var(--sam-muted);
-  font-size: 0.74em;
+  font-size: 0.8em;
 }
 #st-api-account-manager :where(.sam-account-url, .sam-account-model) {
   min-width: 0;
@@ -336,7 +382,21 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#st-api-account-manager .sam-account-model { text-align: right; }
+#st-api-account-manager .sam-account-model {
+  padding: 0.4em 0.6em;
+  border: 1px solid var(--sam-border);
+  border-radius: 6px;
+  background: var(--sam-surface);
+  color: var(--sam-text);
+  text-align: left;
+  font-family: ui-monospace, Consolas, monospace;
+}
+#st-api-account-manager .sam-account-model::before {
+  content: '模型';
+  margin-right: 0.7em;
+  color: var(--sam-muted);
+  font: 0.9em sans-serif;
+}
 #st-api-account-manager .sam-balance-row,
 #st-api-account-manager .sam-form-balance {
   display: flex;
@@ -367,9 +427,7 @@
 }
 #st-api-account-manager .sam-balance-clear-row input { flex: 0 0 auto; }
 #st-api-account-manager .sam-balance-row {
-  margin-top: 0.5em;
-  padding-top: 0.45em;
-  border-top: 1px solid color-mix(in srgb, var(--sam-border) 55%, transparent);
+  margin-top: 0.65em;
 }
 #st-api-account-manager .sam-account-balance {
   flex: 1;
@@ -386,9 +444,11 @@
 }
 #st-api-account-manager .sam-account-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.3em;
-  margin-top: 0.55em;
+  grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(0, 1fr));
+  gap: 0.5em;
+  margin-top: 0.7em;
+  padding-top: 0.7em;
+  border-top: 1px solid var(--sam-border);
 }
 
 #st-api-account-manager .sam-button {
@@ -401,7 +461,7 @@
   margin: 0;
   padding: 0.32em 0.62em;
   border: 1px solid var(--sam-border);
-  border-radius: 0.35em;
+  border-radius: 7px;
   background: var(--sam-subtle);
   color: var(--sam-text);
   font-size: 0.82em;
@@ -419,12 +479,13 @@
 #st-api-account-manager .sam-button-small { min-height: 2rem; font-size: 0.76em; }
 #st-api-account-manager .sam-button-primary {
   border-color: color-mix(in srgb, var(--sam-accent) 70%, var(--sam-border));
-  background: var(--sam-active);
+  background: color-mix(in srgb, var(--sam-accent) 25%, var(--sam-surface));
   color: var(--sam-accent);
   font-weight: 700;
 }
 #st-api-account-manager .sam-button-secondary { background: transparent; }
-#st-api-account-manager .sam-button-quiet { color: var(--sam-muted); background: transparent; }
+#st-api-account-manager .sam-button-quiet { color: var(--sam-muted); background: transparent; border-color: transparent; }
+#st-api-account-manager .sam-button-quiet:hover:enabled { color: var(--sam-danger); border-color: var(--sam-danger); }
 #st-api-account-manager .sam-button-danger { color: var(--sam-danger); border-color: color-mix(in srgb, var(--sam-danger) 60%, var(--sam-border)); }
 #st-api-account-manager :where(.sam-button, .sam-icon-button):hover:enabled { border-color: var(--sam-accent); }
 #st-api-account-manager :where(.sam-button, .sam-icon-button):disabled { opacity: 0.48; cursor: default; }
@@ -513,8 +574,11 @@
 }
 
 #st-api-account-manager .sam-editor {
-  margin-top: 0.25em;
-  border-top: 1px solid var(--sam-border);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--sam-border);
+  border-radius: 10px;
+  background: var(--sam-card);
 }
 #st-api-account-manager .sam-editor-summary {
   display: flex;
@@ -522,7 +586,7 @@
   justify-content: space-between;
   gap: 0.55em;
   min-height: 2.85rem;
-  padding: 0.55em 0.1em;
+  padding: 0.8em 0.9em;
   color: var(--sam-text);
   font-size: 0.9em;
   font-weight: 700;
@@ -538,9 +602,10 @@
   transition: transform 140ms ease;
 }
 #st-api-account-manager .sam-editor[open] > .sam-editor-summary > i { transform: rotate(180deg); }
+#st-api-account-manager .sam-editor[open] > .sam-editor-summary { border-bottom: 1px solid var(--sam-border); }
 #st-api-account-manager .sam-form {
   min-width: 0;
-  padding-top: 0.45em;
+  padding: 0.9em;
 }
 #st-api-account-manager .sam-label-row {
   display: flex;
@@ -561,11 +626,11 @@
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
   gap: 0.55em;
 }
-#st-api-account-manager .sam-field { min-width: 0; margin-bottom: 0.65em; }
+#st-api-account-manager .sam-field { min-width: 0; margin-bottom: 0.9em; }
 #st-api-account-manager :where(.sam-field > label, .sam-label-row > label) {
   display: block;
   margin-bottom: 0.3em;
-  color: var(--sam-muted);
+  color: var(--sam-text);
   font-size: 0.78em;
   font-weight: 700;
 }
@@ -579,7 +644,7 @@
   padding: 0.4em 0.55em;
   border: 1px solid var(--sam-border);
   border-radius: 0.35em;
-  background: color-mix(in srgb, var(--sam-text) 5%, var(--sam-surface));
+  background: var(--sam-surface);
   color: var(--sam-text);
 }
 #st-api-account-manager select option { background: var(--sam-surface); color: var(--sam-text); }
@@ -622,7 +687,7 @@
 #st-api-account-manager .sam-help {
   margin-top: 0.3em;
   color: var(--sam-muted);
-  font-size: 0.72em;
+  font-size: 0.78em;
 }
 #st-api-account-manager .sam-form-balance {
   min-height: 2.5rem;
@@ -631,16 +696,24 @@
   border-top: 1px solid color-mix(in srgb, var(--sam-border) 55%, transparent);
   border-bottom: 1px solid color-mix(in srgb, var(--sam-border) 55%, transparent);
 }
-#st-api-account-manager .sam-form-actions { display: flex; justify-content: flex-end; }
+#st-api-account-manager .sam-form-actions { display: flex; justify-content: flex-end; padding-top: 0.3em; }
+#st-api-account-manager #sam-save-account { width: 100%; min-height: 2.6rem; }
 #st-api-account-manager .sam-status {
-  min-height: 1.4em;
-  margin-top: 0.55em;
-  color: var(--sam-muted);
-  font-size: 0.74em;
+  padding: 0.75em 0.85em;
+  border: 1px solid var(--sam-border);
+  border-left: 4px solid var(--sam-accent);
+  border-radius: 8px;
+  background: var(--sam-card);
+  color: var(--sam-text);
+  font-size: 0.82em;
   overflow-wrap: anywhere;
 }
-#st-api-account-manager .sam-status-error { color: var(--sam-danger); }
-#st-api-account-manager .sam-status-success { color: var(--sam-success); }
+#st-api-account-manager .sam-status-error { border-color: var(--sam-danger); background: color-mix(in srgb, var(--sam-danger) 10%, var(--sam-surface)); }
+#st-api-account-manager .sam-status-success { border-color: var(--sam-success); background: color-mix(in srgb, var(--sam-success) 10%, var(--sam-surface)); }
+#st-api-account-manager .sam-status::before { content: '提示'; display: block; margin-bottom: 0.25em; font-weight: 700; color: var(--sam-accent); }
+#st-api-account-manager .sam-status-error::before { content: '操作未完成'; color: var(--sam-danger); }
+#st-api-account-manager .sam-status-success::before { content: '✓ 操作成功'; color: var(--sam-success); }
+#st-api-account-manager .sam-status-pending::before { content: '正在切换'; }
 
 #st-api-account-manager :where(input, select, button, summary):focus-visible {
   outline: 2px solid var(--sam-accent);
@@ -662,12 +735,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  #st-api-account-manager .fa-spin { animation: none; }
   #st-api-account-manager .sam-header-chevron,
   #st-api-account-manager .sam-editor-summary > i,
   #st-api-account-manager .sam-switch-track::after { transition: none; }
 }
 #st-api-account-manager .sam-polling-hint {
-    margin: 0 0 8px;
-    font-size: 0.85em;
-    opacity: 0.8;
+  margin-top: 0.6em;
+  color: var(--sam-muted);
+  font-size: 0.74em;
 }

@@ -2,21 +2,33 @@
 <details id="st-api-account-manager" class="sam-panel" aria-labelledby="sam-title">
   <summary class="sam-header">
     <span class="sam-brand-mark" aria-hidden="true">
-      <i class="fa-solid fa-address-card"></i>
+      API
     </span>
     <span class="sam-header-text">
       <span id="sam-title" class="sam-title">API 账户管理</span>
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.8.1</span>
+        <span>v1.8.2</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
   </summary>
 
   <div class="sam-content">
+    <p id="sam-status" class="sam-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
     <section class="sam-account-section" aria-label="账户列表">
+      <div class="sam-section-heading">
+        <h4>我的账户</h4>
+        <div class="sam-list-toolbar-actions">
+          <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
+            <span>重命名</span>
+          </button>
+          <button id="sam-refresh-all" class="menu_button sam-button sam-button-small" type="button" aria-label="刷新全部余额" title="刷新全部余额">
+            <i class="fa-solid fa-rotate" aria-hidden="true"></i><span>刷新余额</span>
+          </button>
+        </div>
+      </div>
       <div class="sam-list-toolbar">
         <div id="sam-account-filters" class="sam-account-filters" role="group" aria-label="账户视图">
           <button id="sam-filter-all" class="sam-filter-button" type="button" data-filter="all" aria-pressed="true" aria-controls="sam-account-list">
@@ -27,14 +39,6 @@
           </button>
           <div id="sam-group-filter-buttons" class="sam-group-button-track sam-group-filter-buttons" role="group" aria-label="已保存分组"></div>
         </div>
-        <div class="sam-list-toolbar-actions">
-          <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
-            <span>重命名</span>
-          </button>
-          <button id="sam-refresh-all" class="menu_button sam-icon-button" type="button" aria-label="刷新全部余额" title="刷新全部余额">
-            <i class="fa-solid fa-rotate" aria-hidden="true"></i>
-          </button>
-        </div>
       </div>
 
       <div id="sam-group-rename-editor" class="sam-group-rename-editor" role="group" aria-label="重命名当前分组" hidden>
@@ -43,18 +47,6 @@
         <button id="sam-group-rename-confirm" class="menu_button sam-button sam-button-small sam-button-primary" type="button">确认</button>
         <button id="sam-group-rename-cancel" class="menu_button sam-button sam-button-small" type="button">取消</button>
       </div>
-
-      <div class="sam-polling-tools">
-        <span class="sam-runtime-state">
-          <span class="sam-status-dot" aria-hidden="true"></span>
-          <span id="sam-current-group">切换范围：未选择</span>
-        </span>
-        <button id="sam-toggle-polling" class="menu_button sam-button sam-button-small" type="button" aria-pressed="false" disabled>
-          <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启故障切换</span>
-        </button>
-      </div>
-
-      <p class="sam-polling-hint">当前 API 正常时持续使用；生成报错后切到下一个，请重新生成。</p>
 
       <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
         <div class="sam-empty">还没有保存的 API。</div>
@@ -72,6 +64,20 @@
           <span>分钟</span>
         </label>
       </div>
+    </section>
+
+    <section class="sam-failover-section" aria-label="故障切换">
+      <div class="sam-section-heading"><h4>故障切换</h4><span>生成失败时启用备用 API</span></div>
+      <div class="sam-polling-tools">
+        <span class="sam-runtime-state">
+          <span class="sam-status-dot" aria-hidden="true"></span>
+          <span id="sam-current-group">切换范围：未选择</span>
+        </span>
+        <button id="sam-toggle-polling" class="menu_button sam-button sam-button-small" type="button" aria-pressed="false" disabled>
+          <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启故障切换</span>
+        </button>
+      </div>
+      <p class="sam-polling-hint">正常时保持当前 API；报错后切换，请点击重新生成。</p>
     </section>
 
     <details id="sam-editor" class="sam-editor" open>
@@ -176,6 +182,5 @@
       </form>
     </details>
 
-    <p id="sam-status" class="sam-status" role="status" aria-live="polite">就绪</p>
   </div>
 </details>

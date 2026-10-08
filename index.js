@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.1';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.1';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.1';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.2';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.2';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.2';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.1';
+const EXTENSION_VERSION = '1.8.2';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 
@@ -42,6 +42,7 @@ let formConnectionRevision = 0;
 let isLoadingModels = false;
 let isLoadingBalance = false;
 let isApplyingAccount = false;
+let applyingAccountId = '';
 const activeBalanceQueries = new Map();
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -261,14 +262,18 @@ function setStatus(message, kind = '') {
     const element = $('#sam-status');
     if (!element) return;
     element.textContent = message;
+    element.hidden = !message;
     element.classList.toggle('sam-status-error', kind === 'error');
     element.classList.toggle('sam-status-success', kind === 'success');
+    element.classList.toggle('sam-status-pending', kind === 'pending');
 }
 
 function notify(message, kind = 'info') {
     const toaster = globalThis.toastr;
     if (toaster && typeof toaster[kind] === 'function') {
-        toaster[kind](message, 'API 账户管理');
+        toaster[kind](message, 'API 账户管理', {
+            escapeHtml: true, closeButton: true, timeOut: 5000, extendedTimeOut: 1500,
+        });
     }
     setStatus(message, kind === 'error' ? 'error' : kind === 'success' ? 'success' : '');
 }
@@ -679,19 +684,19 @@ function createAccountCard(account) {
     const actions = document.createElement('div');
     actions.className = 'sam-account-actions';
     const actionDefinitions = [
-        ['edit', 'fa-solid fa-pen', '编辑', '编辑账户'],
         ['apply', 'fa-solid fa-plug', '应用', '设为当前账户并连接此 API'],
+        ['edit', 'fa-solid fa-pen', '编辑', '编辑账户'],
         ['delete', 'fa-solid fa-trash-can', '删除', '删除账户'],
     ];
     for (const [action, iconClass, label, titleText] of actionDefinitions) {
         const button = document.createElement('button');
         button.type = 'button';
-        button.className = `menu_button sam-button ${action === 'delete' ? 'sam-button-quiet' : 'sam-button-secondary'}`;
+        button.className = `menu_button sam-button ${action === 'apply' ? 'sam-button-primary' : action === 'delete' ? 'sam-button-quiet' : 'sam-button-secondary'}`;
         button.dataset.action = action;
         button.dataset.accountId = account.id;
         button.title = titleText;
         setButtonContent(button, iconClass, label);
-        if (action === 'apply') button.disabled = isApplyingAccount;
+        if (action === 'apply') updateApplyButton(button, account);
         actions.append(button);
     }
     item.append(actions);
@@ -950,6 +955,13 @@ function renderAccounts() {
 
 // Applying an API only changes card state. Keeping the existing list nodes
 // avoids collapsing the scroll container or losing the user's current place.
+function updateApplyButton(button, account) {
+    const pending = applyingAccountId === account.id;
+    button.disabled = isApplyingAccount;
+    button.setAttribute('aria-busy', String(pending));
+    setButtonContent(button, pending ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-plug', pending ? '切换中…' : '应用');
+}
+
 function updateAccountSelectionUi() {
     const list = $('#sam-account-list');
     if (!list) return;
@@ -968,7 +980,7 @@ function updateAccountSelectionUi() {
             $('.sam-account-title-line', card)?.append(current);
         } else if (!selected) badge?.remove();
         const button = $('button[data-action="apply"]', card);
-        if (button) button.disabled = isApplyingAccount;
+        if (button) updateApplyButton(button, account);
         const model = $('.sam-account-model', card);
         if (model) model.textContent = model.title = account.selectedModel || '未选择模型';
     }
@@ -1086,7 +1098,9 @@ async function applyToSillyTavern(account, options = {}) {
         return false;
     }
     isApplyingAccount = true;
+    applyingAccountId = account.id;
     updateAccountSelectionUi();
+    setStatus(`正在切换到“${account.name}”…`, 'pending');
     const jq = globalThis.jQuery;
     let connectionStarted = false;
     let connectionResult;
@@ -1098,7 +1112,7 @@ async function applyToSillyTavern(account, options = {}) {
     try {
         let baseUrl = savedApiEndpoint(account);
         if (!baseUrl) {
-            setStatus('正在识别 API 地址…');
+            setStatus(`正在识别“${account.name}”的 API 地址…`, 'pending');
             const snapshot = { ...account };
             const result = await resolveAccountEndpoint(snapshot);
             if (options.shouldApply && !options.shouldApply()) return false;
@@ -1137,7 +1151,7 @@ async function applyToSillyTavern(account, options = {}) {
             notify('账户已被删除，未更新当前账户标识。', 'error');
             return false;
         }
-        notify('已应用，正在连接…');
+        setStatus(`正在应用“${account.name}” · ${model || '未选择模型'}…`, 'pending');
         if (sourceChanged) source.dispatchEvent(new Event('change', { bubbles: true }));
         if (mainChanged) main.dispatchEvent(new Event('change', { bubbles: true }));
         // SillyTavern already connects when its source changes. Reuse that
@@ -1148,6 +1162,18 @@ async function applyToSillyTavern(account, options = {}) {
         }
         if (connectionResult?.then) await connectionResult;
         if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+        // Native custom connections can bypass their status check. Confirm the
+        // applied configuration here; do not claim the upstream is reachable.
+        const current = selectedAccount();
+        const connection = nativeConnectionState();
+        if (!current || current.id !== account.id || !sameAppliedConnection(current, account)
+            || !nativeConnectionMatches(account, connection) || connection.model !== model) {
+            setStatus('连接配置已发生变化，请重新应用需要的账户。');
+            return false;
+        }
+        if (!options.shouldApply) {
+            notify(`切换成功：${account.name} · ${model || '未选择模型'}。已应用到酒馆。`, 'success');
+        }
     } catch (error) {
         notify(error?.message || '连接未能启动，请检查酒馆连接状态。', 'error');
         return false;
@@ -1155,6 +1181,10 @@ async function applyToSillyTavern(account, options = {}) {
         if (jq) jq(connect).off('click.samAccountApply', trackConnection);
         else connect.removeEventListener('click', trackConnection);
         isApplyingAccount = false;
+        applyingAccountId = '';
+        if (!applied && $('#sam-status')?.classList.contains('sam-status-pending')) {
+            setStatus('已取消切换，账户或连接配置已发生变化。');
+        }
         updateAccountSelectionUi();
     }
     return applied;
@@ -1272,7 +1302,7 @@ async function failOverAfterError(snapshot) {
                 // API until one of its own future chat requests actually fails.
                 if (settings.pollingEnabled && settings.selectedAccountId === candidate.id
                     && nativeConnectionMatches(candidate)) {
-                    notify(`当前 API 请求失败，已切换到“${candidate.name}”，请重新生成。`);
+                    notify(`当前 API 请求失败，已切换到“${candidate.name}” · ${candidate.selectedModel || '未选择模型'}，请重新生成。`, 'success');
                 }
                 return;
             }
