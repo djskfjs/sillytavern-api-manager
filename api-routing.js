@@ -1,4 +1,4 @@
-import { requestApiJson } from './balance.js?v=1.5.0';
+import { requestApiJson } from './balance.js?v=1.8.1';
 
 const AUTH_STATUSES = new Set([401, 403]);
 const ROUTE_STATUSES = new Set([404, 405, 410, 501]);
@@ -261,6 +261,15 @@ export async function requestModelsViaSillyTavern(baseUrl, apiKey, options = {})
 export async function requestApiJsonViaSillyTavern(url, apiKey = '', options = {}) {
     const key = String(apiKey || '').trim();
     const target = parseBase(url, key);
+    // Always override the saved chat key, including for public status requests.
+    const upstreamHeaders = { Authorization: key ? `Bearer ${key}` : '' };
+    const accountUserId = String(options.accountUserId || '').trim();
+    if (accountUserId) {
+        if (!/^[1-9]\d*$/.test(accountUserId) || !Number.isSafeInteger(Number(accountUserId))) {
+            throw failure('网站用户 ID 必须是正整数。');
+        }
+        upstreamHeaders['New-Api-User'] = accountUserId;
+    }
     if (typeof options.getRequestHeaders !== 'function') {
         throw failure('当前环境无法提供酒馆请求认证，不能通过酒馆查询余额。', { nativeUnavailable: true });
     }
@@ -281,7 +290,7 @@ export async function requestApiJsonViaSillyTavern(url, apiKey = '', options = {
             body: JSON.stringify({
                 chat_completion_source: 'custom',
                 custom_url: target.href,
-                custom_include_headers: JSON.stringify(key ? { Authorization: `Bearer ${key}` } : {}),
+                custom_include_headers: JSON.stringify(upstreamHeaders),
             }),
         });
         text = await response.text();

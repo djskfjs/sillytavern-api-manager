@@ -9,7 +9,7 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.7.0</span>
+        <span>v1.8.1</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
@@ -19,32 +19,42 @@
     <section class="sam-account-section" aria-label="账户列表">
       <div class="sam-list-toolbar">
         <div id="sam-account-filters" class="sam-account-filters" role="group" aria-label="账户视图">
-          <button id="sam-filter-favorites" class="sam-filter-button" type="button" data-filter="favorites" aria-pressed="false">
-            <i class="fa-solid fa-star" aria-hidden="true"></i><span>收藏 0</span>
-          </button>
-          <button id="sam-filter-all" class="sam-filter-button" type="button" data-filter="all" aria-pressed="true">
+          <button id="sam-filter-all" class="sam-filter-button" type="button" data-filter="all" aria-pressed="true" aria-controls="sam-account-list">
             <span>全部 0</span>
           </button>
-          <label class="sam-group-filter" title="按分组筛选账户">
-            <select id="sam-group-filter" aria-label="选择账户分组">
-              <option value="">选择分组</option>
-            </select>
-          </label>
+          <button id="sam-filter-favorites" class="sam-filter-button" type="button" data-filter="favorites" aria-pressed="false" aria-controls="sam-account-list">
+            <i class="fa-solid fa-star" aria-hidden="true"></i><span>收藏 0</span>
+          </button>
+          <div id="sam-group-filter-buttons" class="sam-group-button-track sam-group-filter-buttons" role="group" aria-label="已保存分组"></div>
         </div>
-        <button id="sam-refresh-all" class="menu_button sam-icon-button" type="button" aria-label="刷新全部余额" title="刷新全部余额">
-          <i class="fa-solid fa-rotate" aria-hidden="true"></i>
-        </button>
+        <div class="sam-list-toolbar-actions">
+          <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
+            <span>重命名</span>
+          </button>
+          <button id="sam-refresh-all" class="menu_button sam-icon-button" type="button" aria-label="刷新全部余额" title="刷新全部余额">
+            <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+          </button>
+        </div>
+      </div>
+
+      <div id="sam-group-rename-editor" class="sam-group-rename-editor" role="group" aria-label="重命名当前分组" hidden>
+        <label class="sam-visually-hidden" for="sam-group-rename-input">新的分组名称</label>
+        <input id="sam-group-rename-input" class="text_pole sam-control" type="text" maxlength="60" placeholder="新的分组名称" autocomplete="off" />
+        <button id="sam-group-rename-confirm" class="menu_button sam-button sam-button-small sam-button-primary" type="button">确认</button>
+        <button id="sam-group-rename-cancel" class="menu_button sam-button sam-button-small" type="button">取消</button>
       </div>
 
       <div class="sam-polling-tools">
         <span class="sam-runtime-state">
           <span class="sam-status-dot" aria-hidden="true"></span>
-          <span id="sam-current-group">轮询范围：未选择</span>
+          <span id="sam-current-group">切换范围：未选择</span>
         </span>
         <button id="sam-toggle-polling" class="menu_button sam-button sam-button-small" type="button" aria-pressed="false" disabled>
-          <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启轮询</span>
+          <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启故障切换</span>
         </button>
       </div>
+
+      <p class="sam-polling-hint">当前 API 正常时持续使用；生成报错后切到下一个，请重新生成。</p>
 
       <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
         <div class="sam-empty">还没有保存的 API。</div>
@@ -59,11 +69,6 @@
         <label class="sam-interval-row" for="sam-refresh-interval">
           <span>余额</span>
           <input id="sam-refresh-interval" class="text_pole sam-control sam-number" type="number" min="1" max="1440" step="1" value="30" inputmode="numeric" aria-label="余额刷新间隔（分钟）" />
-          <span>分钟</span>
-        </label>
-        <label class="sam-interval-row" for="sam-polling-interval">
-          <span>轮询</span>
-          <input id="sam-polling-interval" class="text_pole sam-control sam-number" type="number" min="1" max="1440" step="1" value="5" inputmode="numeric" aria-label="账户轮询间隔（分钟）" />
           <span>分钟</span>
         </label>
       </div>
@@ -94,12 +99,9 @@
         <div class="sam-field">
           <label for="sam-group">分组</label>
           <div class="sam-group-editor">
-            <select id="sam-group-select" class="text_pole sam-control" aria-label="选择已有分组">
-              <option value="">选择已有分组</option>
-            </select>
-            <input id="sam-group" name="group" class="text_pole sam-control" type="text" list="sam-group-options" maxlength="60" placeholder="或输入新分组" autocomplete="off" />
+            <input id="sam-group" name="group" class="text_pole sam-control" type="text" maxlength="60" placeholder="输入分组名称" autocomplete="off" />
+            <div id="sam-group-choices" class="sam-group-button-track sam-group-choices" role="group" aria-label="选择已有分组"></div>
           </div>
-          <datalist id="sam-group-options"></datalist>
         </div>
       </div>
 
@@ -130,6 +132,34 @@
           <option value="">请先获取模型</option>
         </select>
       </div>
+
+      <details id="sam-balance-settings" class="sam-balance-settings">
+        <summary>站点余额查询</summary>
+        <p class="sam-help">查询网站账户里的余额。部分中转站需要单独填写账户访问令牌。</p>
+        <div class="sam-field">
+          <label for="sam-balance-mode">查询方式</label>
+          <select id="sam-balance-mode" class="text_pole sam-control">
+            <option value="auto">自动识别账户余额接口</option>
+            <option value="account">网站账户（中转站）</option>
+          </select>
+        </div>
+        <div id="sam-balance-account-fields" hidden>
+          <div class="sam-field">
+            <label for="sam-balance-access-token">网站账户访问令牌</label>
+            <input id="sam-balance-access-token" class="text_pole sam-control" type="password" autocomplete="new-password" spellcheck="false" placeholder="在网站个人设置中获取" aria-describedby="sam-balance-token-help" />
+            <p id="sam-balance-token-help" class="sam-help">在网站的个人设置中生成访问令牌。这里需要账户访问令牌，聊天 API Key 不能代替它。编辑时留空保留已保存的令牌。</p>
+          </div>
+          <div class="sam-field">
+            <label for="sam-balance-user-id">网站用户 ID</label>
+            <input id="sam-balance-user-id" class="text_pole sam-control" type="text" inputmode="numeric" pattern="[1-9][0-9]*" autocomplete="off" placeholder="例如：123" aria-describedby="sam-balance-user-help" />
+            <p id="sam-balance-user-help" class="sam-help">在网站个人资料中查看；New API 站点通常需要填写。</p>
+          </div>
+          <label id="sam-balance-clear-row" class="sam-balance-clear-row" hidden>
+            <input id="sam-clear-balance-token" type="checkbox" />
+            <span>清除已保存的账户访问令牌</span>
+          </label>
+        </div>
+      </details>
 
       <div class="sam-form-balance">
         <output id="sam-form-balance" class="sam-account-balance" aria-live="polite">账户余额：保存后可查询</output>

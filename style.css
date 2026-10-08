@@ -33,6 +33,17 @@
 #st-api-account-manager [hidden] { display: none !important; }
 #st-api-account-manager :where(input, select, button) { font: inherit; letter-spacing: 0; }
 #st-api-account-manager :where(h4, p) { margin: 0; }
+#st-api-account-manager .sam-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 
 #st-api-account-manager > .sam-header {
   display: grid;
@@ -93,14 +104,20 @@
 #st-api-account-manager .sam-content { min-width: 0; padding: 0.75em; }
 #st-api-account-manager .sam-list-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 2.35rem;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 0.45em;
   margin-bottom: 0.55em;
 }
+#st-api-account-manager .sam-list-toolbar-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35em;
+  min-width: 0;
+}
 #st-api-account-manager .sam-account-filters {
   display: grid;
-  grid-template-columns: auto auto minmax(7.5rem, 1fr);
+  grid-template-columns: auto auto minmax(0, 1fr);
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--sam-border);
@@ -132,39 +149,54 @@
 }
 #st-api-account-manager .sam-filter-button:hover { background: var(--sam-subtle); color: var(--sam-text); }
 
-#st-api-account-manager .sam-group-filter {
-  position: relative;
-  display: block;
-  align-items: center;
+#st-api-account-manager .sam-group-button-track {
+  display: flex;
+  align-items: stretch;
   min-width: 0;
-  min-height: 2.3rem;
-  padding: 0 0.55em;
-  color: var(--sam-muted);
-  background: transparent;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--sam-muted) transparent;
 }
-#st-api-account-manager .sam-group-filter.sam-active {
-  background: var(--sam-active);
-  color: var(--sam-accent);
-}
-#st-api-account-manager .sam-group-filter:focus-within {
-  outline: 0;
-  box-shadow: inset 0 0 0 2px var(--sam-accent);
-}
-#st-api-account-manager .sam-group-filter select {
-  width: 100%;
+#st-api-account-manager .sam-group-button-track > button {
+  flex: 0 0 auto;
   min-width: 0;
-  height: 100%;
+  max-width: min(14rem, 85%);
   margin: 0;
-  padding: 0;
   overflow: hidden;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: inherit;
-  font-size: 0.78em;
   text-overflow: ellipsis;
+  white-space: nowrap;
   cursor: pointer;
 }
+#st-api-account-manager .sam-group-filter-buttons {
+  min-height: 2.3rem;
+}
+#st-api-account-manager .sam-group-filter-buttons > button {
+  min-height: 2.3rem;
+  padding: 0.42em 0.58em;
+  border: 0;
+  border-inline-end: 1px solid var(--sam-border);
+  border-radius: 0;
+  background: transparent;
+  color: var(--sam-muted);
+  font-size: 0.78em;
+}
+#st-api-account-manager .sam-group-filter-buttons > button:hover { background: var(--sam-subtle); color: var(--sam-text); }
+#st-api-account-manager .sam-group-filter-buttons > button[aria-pressed="true"] {
+  background: var(--sam-active);
+  color: var(--sam-accent);
+  font-weight: 700;
+}
+#st-api-account-manager .sam-group-rename-editor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: stretch;
+  gap: 0.35em;
+  margin: -0.1em 0 0.55em;
+}
+#st-api-account-manager .sam-group-rename-editor .sam-control { min-height: 2.15rem; }
 
 #st-api-account-manager .sam-icon-button {
   display: inline-flex;
@@ -313,6 +345,27 @@
   flex-wrap: wrap;
   gap: 0.4em;
 }
+#st-api-account-manager .sam-balance-settings {
+  min-width: 0;
+  margin-bottom: 0.65em;
+  padding: 0.55em;
+  border: 1px solid var(--sam-border);
+  border-radius: 0.35em;
+}
+#st-api-account-manager .sam-balance-settings > summary {
+  color: var(--sam-text);
+  font-size: 0.82em;
+  cursor: pointer;
+}
+#st-api-account-manager .sam-balance-settings .sam-help { overflow-wrap: anywhere; }
+#st-api-account-manager .sam-balance-clear-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  color: var(--sam-muted);
+  font-size: 0.76em;
+}
+#st-api-account-manager .sam-balance-clear-row input { flex: 0 0 auto; }
 #st-api-account-manager .sam-balance-row {
   margin-top: 0.5em;
   padding-top: 0.45em;
@@ -539,8 +592,29 @@
 }
 #st-api-account-manager .sam-group-editor {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.4em;
+}
+#st-api-account-manager .sam-group-choices {
+  gap: 0.35em;
+  padding: 0.05em 0 0.18em;
+}
+#st-api-account-manager .sam-group-choices:empty { display: none; }
+#st-api-account-manager .sam-group-choices > button {
+  min-height: 2.05rem;
+  padding: 0.28em 0.58em;
+  border: 1px solid var(--sam-border);
+  border-radius: 0.35em;
+  background: var(--sam-subtle);
+  color: var(--sam-muted);
+  font-size: 0.76em;
+}
+#st-api-account-manager .sam-group-choices > button:hover { border-color: var(--sam-accent); color: var(--sam-text); }
+#st-api-account-manager .sam-group-choices > button[aria-pressed="true"] {
+  border-color: var(--sam-accent);
+  background: var(--sam-active);
+  color: var(--sam-accent);
+  font-weight: 700;
 }
 #st-api-account-manager .sam-secret-wrap { display: flex; align-items: stretch; gap: 0.4em; }
 #st-api-account-manager .sam-secret-wrap input { flex: 1; }
@@ -576,10 +650,11 @@
 @container (max-width: 330px) {
   #st-api-account-manager .sam-account-filters { grid-template-columns: 1fr 1fr; }
   #st-api-account-manager .sam-filter-button:nth-child(2) { border-right: 0; }
-  #st-api-account-manager .sam-group-filter {
+  #st-api-account-manager .sam-group-filter-buttons {
     grid-column: 1 / -1;
     border-top: 1px solid var(--sam-border);
   }
+  #st-api-account-manager .sam-group-rename-editor { grid-template-columns: minmax(0, 1fr) auto auto; }
   #st-api-account-manager .sam-field-grid,
   #st-api-account-manager .sam-group-editor { grid-template-columns: minmax(0, 1fr); }
   #st-api-account-manager .sam-account-meta { grid-template-columns: minmax(0, 1fr); gap: 0.15em; }
@@ -590,4 +665,9 @@
   #st-api-account-manager .sam-header-chevron,
   #st-api-account-manager .sam-editor-summary > i,
   #st-api-account-manager .sam-switch-track::after { transition: none; }
+}
+#st-api-account-manager .sam-polling-hint {
+    margin: 0 0 8px;
+    font-size: 0.85em;
+    opacity: 0.8;
 }
