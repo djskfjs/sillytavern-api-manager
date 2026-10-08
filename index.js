@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.2';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.2';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.2';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.3';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.3';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.3';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.2';
+const EXTENSION_VERSION = '1.8.3';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 
@@ -44,6 +44,7 @@ let isLoadingBalance = false;
 let isApplyingAccount = false;
 let applyingAccountId = '';
 const activeBalanceQueries = new Map();
+const activeModelQueries = new Map();
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
@@ -258,16 +259,6 @@ function rootElement() {
     return document.getElementById(SETTINGS_ROOT_ID);
 }
 
-function setStatus(message, kind = '') {
-    const element = $('#sam-status');
-    if (!element) return;
-    element.textContent = message;
-    element.hidden = !message;
-    element.classList.toggle('sam-status-error', kind === 'error');
-    element.classList.toggle('sam-status-success', kind === 'success');
-    element.classList.toggle('sam-status-pending', kind === 'pending');
-}
-
 function notify(message, kind = 'info') {
     const toaster = globalThis.toastr;
     if (toaster && typeof toaster[kind] === 'function') {
@@ -275,7 +266,6 @@ function notify(message, kind = 'info') {
             escapeHtml: true, closeButton: true, timeOut: 5000, extendedTimeOut: 1500,
         });
     }
-    setStatus(message, kind === 'error' ? 'error' : kind === 'success' ? 'success' : '');
 }
 
 function readForm() {
@@ -327,7 +317,25 @@ function readForm() {
     };
 }
 
+function placeAccountForm() {
+    const form = $('#sam-account-form');
+    const editor = $('#sam-editor');
+    if (!form || !editor) return;
+    const accountId = asString($('#sam-account-id')?.value);
+    let destination = editor;
+    for (const card of $$('.sam-account-item')) {
+        const editing = Boolean(accountId) && card.dataset.accountId === accountId;
+        card.classList.toggle('sam-editing', editing);
+        $('button[data-action="edit"]', card)?.setAttribute('aria-expanded', String(editing));
+        if (editing) destination = card;
+    }
+    editor.hidden = Boolean(accountId);
+    form.setAttribute('aria-label', accountId ? '编辑站点' : '添加 API');
+    if (form.parentElement !== destination) destination.append(form);
+}
+
 function clearForm() {
+    const editedId = asString($('#sam-account-id')?.value);
     formConnectionRevision++;
     formResolvedConnection = null;
     const form = $('#sam-account-form');
@@ -356,8 +364,11 @@ function clearForm() {
     updateBalanceSettingsUi();
     if ($('#sam-balance-settings')) $('#sam-balance-settings').open = false;
     updateFormBalance();
-    setStatus('就绪');
-    $('.sam-editor-summary')?.focus({ preventScroll: true });
+    placeAccountForm();
+    const card = $$('.sam-account-item').find(item => item.dataset.accountId === editedId);
+    const focusTarget = card ? $('button[data-action="edit"]', card)
+        : editedId ? $('#sam-account-search') : $('.sam-editor-summary');
+    focusTarget?.focus({ preventScroll: true });
 }
 
 function fillForm(account) {
@@ -384,7 +395,7 @@ function fillForm(account) {
     populateModelSelect(formModels, account.selectedModel);
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = false;
     if ($('#sam-delete-account')) $('#sam-delete-account').hidden = false;
-    setButtonContent($('#sam-save-account'), 'fa-solid fa-floppy-disk', '更新 API');
+    setButtonContent($('#sam-save-account'), 'fa-solid fa-floppy-disk', '保存修改');
     if ($('#sam-form-title')) $('#sam-form-title').textContent = '编辑 API';
     if ($('#sam-api-key')) {
         $('#sam-api-key').required = false;
@@ -395,7 +406,7 @@ function fillForm(account) {
     updateBalanceSettingsUi();
     if ($('#sam-balance-settings')) $('#sam-balance-settings').open = account.balanceMode === 'account';
     updateFormBalance();
-    setStatus(`正在编辑：${account.name}`);
+    placeAccountForm();
 }
 
 function populateModelSelect(models, selected = '') {
@@ -462,7 +473,6 @@ async function fetchModelsForDraft() {
         button.disabled = true;
         setButtonContent(button, 'fa-solid fa-spinner fa-spin', '获取中…');
     }
-    setStatus('正在获取模型…');
     try {
         const result = await resolveAccountEndpoint(draft);
         if (!stillCurrent()) return;
@@ -482,6 +492,79 @@ async function fetchModelsForDraft() {
             setButtonContent(button, 'fa-solid fa-cloud-arrow-down', '获取模型');
         }
     }
+}
+
+function updateAccountModelsButton(button, account) {
+    const query = activeModelQueries.get(account.id);
+    const pending = Boolean(query && query.snapshot.baseUrl === account.baseUrl && query.snapshot.apiKey === account.apiKey);
+    button.disabled = pending;
+    button.setAttribute('aria-busy', String(pending));
+    setButtonContent(button, pending ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-cloud-arrow-down',
+        pending ? '获取中…' : '获取模型');
+}
+
+function updateAccountModelUi(account) {
+    const card = $$('.sam-account-item').find(item => item.dataset.accountId === account.id);
+    if (!card) return;
+    const model = $('.sam-account-model', card);
+    if (model) model.textContent = model.title = account.selectedModel || '未选择模型';
+    const url = $('.sam-account-url', card);
+    if (url) url.textContent = url.title = displayApiUrl(account.baseUrl);
+    const button = $('button[data-action="models"]', card);
+    if (button) updateAccountModelsButton(button, account);
+}
+
+async function fetchModelsForAccount(account) {
+    const snapshot = { ...account };
+    const sameConnection = current => current && current.baseUrl === snapshot.baseUrl && current.apiKey === snapshot.apiKey;
+    const active = activeModelQueries.get(snapshot.id);
+    if (active && sameConnection(active.snapshot)) return active.promise;
+    const query = { snapshot, promise: null };
+    const currentAccount = () => activeModelQueries.get(snapshot.id) === query
+        ? settings.accounts.find(current => current.id === snapshot.id && sameConnection(current))
+        : undefined;
+    query.promise = Promise.resolve().then(async () => {
+        try {
+            const result = await resolveAccountEndpoint(snapshot);
+            const current = currentAccount();
+            if (!current) return;
+            const previous = { ...current };
+            current.baseUrl = displayApiUrl(result.baseUrl);
+            current.resolvedBaseUrl = result.baseUrl;
+            current.selectedModel ||= result.models[0] || '';
+            current.models = [...new Set([current.selectedModel, ...result.models].filter(Boolean))];
+            current.updatedAt = Date.now();
+            if (current.id === settings.selectedAccountId && !sameAppliedConnection(previous, current)) {
+                settings.selectedAccountId = '';
+                invalidateFailover();
+            }
+            persist();
+            // Refresh the matching draft's model choices without replacing typed fields.
+            if ($('#sam-account-id')?.value === current.id) {
+                const draft = readForm();
+                if (draft.baseUrl === current.baseUrl && draft.apiKey === current.apiKey) {
+                    formModels = [...new Set([draft.selectedModel, ...current.models].filter(Boolean))];
+                    formResolvedConnection = { baseUrl: current.baseUrl, apiKey: current.apiKey, resolvedBaseUrl: result.baseUrl };
+                    populateModelSelect(formModels, draft.selectedModel || current.selectedModel);
+                }
+            }
+            updateAccountSelectionUi();
+            updatePollingState();
+            notify(`已获取“${current.name}”的 ${result.models.length} 个模型。`, 'success');
+        } catch (error) {
+            const current = currentAccount();
+            if (current) notify(`${current.name}：${error?.message || '获取模型失败。'}`, 'error');
+        } finally {
+            if (activeModelQueries.get(snapshot.id) === query) {
+                activeModelQueries.delete(snapshot.id);
+                const current = settings.accounts.find(item => item.id === snapshot.id);
+                if (current) updateAccountModelUi(current);
+            }
+        }
+    });
+    activeModelQueries.set(snapshot.id, query);
+    updateAccountModelUi(account);
+    return query.promise;
 }
 
 async function refreshBalance(account, options = {}) {
@@ -531,7 +614,6 @@ async function refreshBalance(account, options = {}) {
 async function refreshAllBalances(options = {}) {
     if (isLoadingBalance || !settings.accounts.length) return;
     isLoadingBalance = true;
-    if (!options.silent) setStatus('正在刷新余额…');
     try {
         // Sequential requests avoid flooding providers and keep rate limits friendly.
         for (const account of settings.accounts) await refreshBalance(account, { silent: true });
@@ -650,11 +732,21 @@ function createAccountCard(account) {
     url.className = 'sam-account-url';
     url.title = displayApiUrl(account.baseUrl);
     url.textContent = displayApiUrl(account.baseUrl) || '未填写 API 地址';
+    const modelRow = document.createElement('div');
+    modelRow.className = 'sam-account-model-row';
     const model = document.createElement('span');
     model.className = 'sam-account-model';
     model.title = account.selectedModel || '未选择模型';
     model.textContent = account.selectedModel || '未选择模型';
-    meta.append(url, model);
+    const modelsButton = document.createElement('button');
+    modelsButton.type = 'button';
+    modelsButton.className = 'menu_button sam-button sam-button-small';
+    modelsButton.dataset.action = 'models';
+    modelsButton.dataset.accountId = account.id;
+    modelsButton.setAttribute('aria-label', `获取 ${account.name} 的模型列表`);
+    updateAccountModelsButton(modelsButton, account);
+    modelRow.append(model, modelsButton);
+    meta.append(url, modelRow);
     item.append(meta);
     const balanceRow = document.createElement('div');
     balanceRow.className = 'sam-balance-row';
@@ -697,6 +789,10 @@ function createAccountCard(account) {
         button.title = titleText;
         setButtonContent(button, iconClass, label);
         if (action === 'apply') updateApplyButton(button, account);
+        if (action === 'edit') {
+            button.setAttribute('aria-controls', 'sam-account-form');
+            button.setAttribute('aria-expanded', 'false');
+        }
         actions.append(button);
     }
     item.append(actions);
@@ -720,7 +816,7 @@ function createGroupButton(group, { count, formChoice = false } = {}) {
     button.dataset.group = group;
     if (!formChoice) {
         button.dataset.filter = 'group';
-        button.setAttribute('aria-controls', 'sam-account-list');
+        button.setAttribute('aria-controls', 'sam-account-list sam-failover-section');
     }
     const label = groupDisplayLabel(group, !formChoice);
     button.textContent = count == null ? label : `${label} ${count}`;
@@ -872,17 +968,19 @@ function selectedAccount() {
     return settings.accounts.find(account => account.id === settings.selectedAccountId);
 }
 
-function suggestedPollingFilter() {
-    if (settings.accountFilter.type === 'favorites') return { type: 'favorites' };
-    if (settings.accountFilter.type === 'group') return { ...settings.accountFilter };
-    const account = selectedAccount();
-    return account ? { type: 'group', group: account.group } : null;
+function viewedPollingFilter() {
+    return normalizePollingFilter(settings.accountFilter, settings.accounts);
 }
 
 function currentPollingFilter() {
     return settings.pollingEnabled
         ? normalizePollingFilter(settings.pollingFilter, settings.accounts)
-        : normalizePollingFilter(suggestedPollingFilter(), settings.accounts);
+        : viewedPollingFilter();
+}
+
+function isPollingEnabledFor(filter) {
+    return Boolean(settings.pollingEnabled && filter && filter.type === settings.pollingFilter?.type
+        && (filter.type === 'favorites' || filter.group === settings.pollingFilter.group));
 }
 
 function pollingAccounts(filter = currentPollingFilter()) {
@@ -902,26 +1000,29 @@ function pollingFilterLabel(filter) {
 }
 
 function updatePollingUi() {
-    const filter = currentPollingFilter();
+    const filter = viewedPollingFilter();
+    const section = $('#sam-failover-section');
+    if (section) section.hidden = !filter;
+    const enabled = isPollingEnabledFor(filter);
     const accounts = pollingAccounts(filter);
     const currentInRange = accountMatchesFilter(selectedAccount(), filter);
     const label = $('#sam-current-group');
     if (label) label.textContent = filter
         ? `切换范围：${pollingFilterLabel(filter)} · ${accounts.length} 个账户`
-            + (settings.pollingEnabled && !currentInRange ? ' · 当前 API 不在范围内，已暂停' : '')
+            + (enabled && !currentInRange ? ' · 当前 API 不在范围内，已暂停' : '')
         : '切换范围：未选择';
     const button = $('#sam-toggle-polling');
     if (button) {
-        button.disabled = !settings.pollingEnabled && (accounts.length < 2 || !currentInRange);
+        button.disabled = !filter || (!enabled && (accounts.length < 2 || !currentInRange));
         button.title = accounts.length < 2
             ? '故障切换范围至少需要两个账户'
             : !currentInRange ? '请先应用当前范围内的一个 API'
                 : `当前 API 正常时持续使用；生成报错后切换到“${pollingFilterLabel(filter)}”中的下一个`;
         setButtonContent(button,
-            settings.pollingEnabled ? 'fa-solid fa-stop' : 'fa-solid fa-shuffle',
-            settings.pollingEnabled ? '停止故障切换' : '开启故障切换');
-        button.setAttribute('aria-pressed', String(settings.pollingEnabled));
-        button.classList.toggle('sam-button-primary', settings.pollingEnabled);
+            enabled ? 'fa-solid fa-stop' : 'fa-solid fa-shuffle',
+            enabled ? '停止故障切换' : '开启故障切换');
+        button.setAttribute('aria-pressed', String(enabled));
+        button.classList.toggle('sam-button-primary', enabled);
     }
 }
 
@@ -938,18 +1039,29 @@ function renderAccounts() {
     if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
     const list = $('#sam-account-list');
     if (!list) return;
-    const accounts = filteredAccounts(settings.accounts, settings.accountFilter);
+    const searchQuery = asString($('#sam-account-search')?.value).trim();
+    const normalizedSearch = searchQuery.toLocaleLowerCase();
+    const accounts = filteredAccounts(settings.accounts, settings.accountFilter)
+        .filter(account => !normalizedSearch || account.name.toLocaleLowerCase().includes(normalizedSearch));
+    const searchFeedback = $('#sam-search-feedback');
+    if (searchFeedback) searchFeedback.textContent = searchQuery ? `找到 ${accounts.length} 个匹配的站点` : '';
     const scrollTop = list.scrollTop;
+    // Keep the shared form connected while rebuilding cards, including when
+    // a filter temporarily hides the account being edited.
+    const form = $('#sam-account-form');
+    if (form && list.contains(form)) $('#sam-editor')?.append(form);
     if (!accounts.length) {
         const empty = document.createElement('div');
         empty.className = 'sam-empty';
-        empty.textContent = settings.accounts.length && settings.accountFilter.type === 'favorites'
-            ? '还没有收藏的 API。'
-            : '还没有保存的 API。';
+        empty.textContent = searchQuery ? `没有找到匹配“${searchQuery}”的站点。`
+            : settings.accounts.length && settings.accountFilter.type === 'favorites'
+                ? '还没有收藏的 API。'
+                : '还没有保存的 API。';
         list.replaceChildren(empty);
-        return;
+    } else {
+        list.replaceChildren(...accounts.map(createAccountCard));
     }
-    list.replaceChildren(...accounts.map(createAccountCard));
+    placeAccountForm();
     list.scrollTop = scrollTop;
 }
 
@@ -1017,6 +1129,7 @@ function saveAccountFromForm(event) {
 
 function editAccount(account) {
     fillForm(account);
+    $('#sam-name')?.focus({ preventScroll: true });
 }
 
 function markSelectedAccount(account) {
@@ -1100,7 +1213,6 @@ async function applyToSillyTavern(account, options = {}) {
     isApplyingAccount = true;
     applyingAccountId = account.id;
     updateAccountSelectionUi();
-    setStatus(`正在切换到“${account.name}”…`, 'pending');
     const jq = globalThis.jQuery;
     let connectionStarted = false;
     let connectionResult;
@@ -1112,13 +1224,15 @@ async function applyToSillyTavern(account, options = {}) {
     try {
         let baseUrl = savedApiEndpoint(account);
         if (!baseUrl) {
-            setStatus(`正在识别“${account.name}”的 API 地址…`, 'pending');
             const snapshot = { ...account };
             const result = await resolveAccountEndpoint(snapshot);
             if (options.shouldApply && !options.shouldApply()) return false;
             const current = settings.accounts.find(item => item.id === snapshot.id
                 && item.baseUrl === snapshot.baseUrl && item.apiKey === snapshot.apiKey);
-            if (!current) return false;
+            if (!current) {
+                if (!options.shouldApply) notify('已取消切换，账户或连接配置已发生变化。');
+                return false;
+            }
             baseUrl = result.baseUrl;
             current.baseUrl = displayApiUrl(baseUrl);
             current.resolvedBaseUrl = baseUrl;
@@ -1151,7 +1265,6 @@ async function applyToSillyTavern(account, options = {}) {
             notify('账户已被删除，未更新当前账户标识。', 'error');
             return false;
         }
-        setStatus(`正在应用“${account.name}” · ${model || '未选择模型'}…`, 'pending');
         if (sourceChanged) source.dispatchEvent(new Event('change', { bubbles: true }));
         if (mainChanged) main.dispatchEvent(new Event('change', { bubbles: true }));
         // SillyTavern already connects when its source changes. Reuse that
@@ -1168,7 +1281,7 @@ async function applyToSillyTavern(account, options = {}) {
         const connection = nativeConnectionState();
         if (!current || current.id !== account.id || !sameAppliedConnection(current, account)
             || !nativeConnectionMatches(account, connection) || connection.model !== model) {
-            setStatus('连接配置已发生变化，请重新应用需要的账户。');
+            if (!options.shouldApply) notify('连接配置已发生变化，请重新应用需要的账户。');
             return false;
         }
         if (!options.shouldApply) {
@@ -1182,9 +1295,6 @@ async function applyToSillyTavern(account, options = {}) {
         else connect.removeEventListener('click', trackConnection);
         isApplyingAccount = false;
         applyingAccountId = '';
-        if (!applied && $('#sam-status')?.classList.contains('sam-status-pending')) {
-            setStatus('已取消切换，账户或连接配置已发生变化。');
-        }
         updateAccountSelectionUi();
     }
     return applied;
@@ -1209,6 +1319,7 @@ async function handleAccountAction(event) {
                 || rootElement())?.focus({ preventScroll: true });
             break;
         case 'balance': await refreshBalance(account); break;
+        case 'models': await fetchModelsForAccount(account); break;
         case 'apply':
             await applyToSillyTavern(account);
             {
@@ -1369,7 +1480,9 @@ function updatePollingState() {
 }
 
 function togglePolling() {
-    if (settings.pollingEnabled) {
+    const filter = viewedPollingFilter();
+    if (!filter) return notify('请先选择具体分组或收藏视图。', 'error');
+    if (isPollingEnabledFor(filter)) {
         settings.pollingEnabled = false;
         settings.pollingFilter = null;
         invalidateFailover();
@@ -1378,9 +1491,7 @@ function togglePolling() {
         notify('已停止故障切换。');
         return;
     }
-    const filter = currentPollingFilter();
     const accounts = pollingAccounts(filter);
-    if (!filter) return notify('请先选择收藏、具体分组，或应用一个账户。', 'error');
     if (accounts.length < 2) return notify('故障切换范围至少需要两个账户。', 'error');
     if (!accountMatchesFilter(selectedAccount(), filter)) return notify('请先应用当前范围内的一个 API，再开启故障切换。', 'error');
     invalidateFailover();
@@ -1439,6 +1550,11 @@ function bindEvents() {
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
     $('#sam-toggle-polling')?.addEventListener('click', togglePolling);
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
+    $('#sam-account-search')?.addEventListener('input', () => {
+        renderAccounts();
+        const list = $('#sam-account-list');
+        if (list) list.scrollTop = 0;
+    });
     $('#sam-account-filters')?.addEventListener('click', event => {
         const button = event.target.closest('button[data-filter]');
         if (!button) return;

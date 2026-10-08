@@ -1,4 +1,4 @@
-import { requestApiJson } from './balance.js?v=1.8.2';
+import { requestApiJson } from './balance.js?v=1.8.3';
 
 const AUTH_STATUSES = new Set([401, 403]);
 const ROUTE_STATUSES = new Set([404, 405, 410, 501]);
