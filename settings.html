@@ -9,7 +9,7 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.8.4</span>
+        <span>v1.8.5</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
@@ -18,12 +18,12 @@
   <div class="sam-content">
     <section class="sam-account-section" aria-label="账户列表">
       <div class="sam-section-heading">
-        <h4 class="sam-accounts-heading">
+        <div class="sam-subheading sam-accounts-heading" role="heading" aria-level="4">
           <button id="sam-accounts-toggle" class="sam-accounts-toggle" type="button" aria-expanded="true" aria-controls="sam-accounts-content">
             <span class="sam-section-title">我的账户</span>
             <svg class="sam-section-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4" /></svg>
           </button>
-        </h4>
+        </div>
         <div class="sam-list-toolbar-actions">
           <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
             <span>重命名</span>
@@ -58,15 +58,15 @@
           <button id="sam-group-rename-cancel" class="menu_button sam-button sam-button-small" type="button">取消</button>
         </div>
 
-        <section id="sam-failover-section" class="sam-failover-section" aria-label="当前分组的故障切换" hidden>
-          <div class="sam-section-heading"><h4>故障切换</h4><span>生成失败时启用备用 API</span></div>
+        <section id="sam-failover-section" class="sam-failover-section" aria-label="当前分组的轮询" hidden>
+          <div class="sam-section-heading"><div class="sam-subheading" role="heading" aria-level="4">轮询</div><span>生成失败时启用备用 API</span></div>
           <div class="sam-polling-tools">
             <span class="sam-runtime-state">
               <span class="sam-status-dot" aria-hidden="true"></span>
-              <span id="sam-current-group">切换范围：未选择</span>
+              <span id="sam-current-group">轮询范围：未选择</span>
             </span>
             <button id="sam-toggle-polling" class="menu_button sam-button sam-button-small" type="button" aria-pressed="false" disabled>
-              <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启故障切换</span>
+              <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启轮询</span>
             </button>
           </div>
           <p class="sam-polling-hint">正常时保持当前 API；报错后切换，请点击重新生成。</p>

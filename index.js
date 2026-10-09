@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.4';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.4';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.4';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.5';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.5';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.5';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.4';
+const EXTENSION_VERSION = '1.8.5';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 
@@ -1008,19 +1008,19 @@ function updatePollingUi() {
     const currentInRange = accountMatchesFilter(selectedAccount(), filter);
     const label = $('#sam-current-group');
     if (label) label.textContent = filter
-        ? `切换范围：${pollingFilterLabel(filter)} · ${accounts.length} 个账户`
+        ? `轮询范围：${pollingFilterLabel(filter)} · ${accounts.length} 个账户`
             + (enabled && !currentInRange ? ' · 当前 API 不在范围内，已暂停' : '')
-        : '切换范围：未选择';
+        : '轮询范围：未选择';
     const button = $('#sam-toggle-polling');
     if (button) {
         button.disabled = !filter || (!enabled && (accounts.length < 2 || !currentInRange));
         button.title = accounts.length < 2
-            ? '故障切换范围至少需要两个账户'
+            ? '轮询范围至少需要两个账户'
             : !currentInRange ? '请先应用当前范围内的一个 API'
                 : `当前 API 正常时持续使用；生成报错后切换到“${pollingFilterLabel(filter)}”中的下一个`;
         setButtonContent(button,
             enabled ? 'fa-solid fa-stop' : 'fa-solid fa-shuffle',
-            enabled ? '停止故障切换' : '开启故障切换');
+            enabled ? '停止轮询' : '开启轮询');
         button.setAttribute('aria-pressed', String(enabled));
         button.classList.toggle('sam-button-primary', enabled);
     }
@@ -1450,7 +1450,7 @@ function installGenerationFailover() {
         // finish first. This timer never rotates a healthy or idle account.
         pendingFailoverTimer = setTimeout(() => {
             pendingFailoverTimer = null;
-            void failOverAfterError(failure).catch(() => notify('故障切换未能完成，请检查 API 连接设置。', 'error'));
+            void failOverAfterError(failure).catch(() => notify('轮询切换未能完成，请检查 API 连接设置。', 'error'));
         }, 0);
     });
     const stop = () => {
@@ -1488,18 +1488,18 @@ function togglePolling() {
         invalidateFailover();
         persist();
         updatePollingState();
-        notify('已停止故障切换。');
+        notify('已停止轮询。');
         return;
     }
     const accounts = pollingAccounts(filter);
-    if (accounts.length < 2) return notify('故障切换范围至少需要两个账户。', 'error');
-    if (!accountMatchesFilter(selectedAccount(), filter)) return notify('请先应用当前范围内的一个 API，再开启故障切换。', 'error');
+    if (accounts.length < 2) return notify('轮询范围至少需要两个账户。', 'error');
+    if (!accountMatchesFilter(selectedAccount(), filter)) return notify('请先应用当前范围内的一个 API，再开启轮询。', 'error');
     invalidateFailover();
     settings.pollingEnabled = true;
     settings.pollingFilter = filter;
     persist();
     updatePollingState();
-    notify(`已开启“${pollingFilterLabel(filter)}”故障切换，当前 API 正常时保持使用，生成报错后才切换。`, 'success');
+    notify(`已开启“${pollingFilterLabel(filter)}”轮询，当前 API 正常时保持使用，生成报错后才切换。`, 'success');
 }
 
 function bindEvents() {

@@ -124,7 +124,8 @@
   gap: 0.3em 0.6em;
   margin-bottom: 0.7em;
 }
-#st-api-account-manager .sam-section-heading h4 {
+/* Independent headings avoid the host theme's h4 borders and pseudo-elements. */
+#st-api-account-manager .sam-subheading {
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -135,9 +136,8 @@
   font-size: 0.9em;
   font-weight: 700;
 }
-/* Only the two top-level section titles carry an accent, regardless of theme h4 styling. */
-#st-api-account-manager .sam-section-heading h4::before,
-#st-api-account-manager .sam-section-heading h4::after { content: none; display: none; }
+#st-api-account-manager .sam-subheading::before,
+#st-api-account-manager .sam-subheading::after { content: none; display: none; }
 #st-api-account-manager .sam-section-title {
   display: inline-flex;
   align-items: center;
