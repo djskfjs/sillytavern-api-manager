@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.3';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.3';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.3';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.4';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.4';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.4';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.3';
+const EXTENSION_VERSION = '1.8.4';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 
@@ -1503,6 +1503,12 @@ function togglePolling() {
 }
 
 function bindEvents() {
+    $('#sam-accounts-toggle')?.addEventListener('click', event => {
+        const content = $('#sam-accounts-content');
+        if (!content) return;
+        content.hidden = !content.hidden;
+        event.currentTarget.setAttribute('aria-expanded', String(!content.hidden));
+    });
     const form = $('#sam-account-form');
     form?.addEventListener('submit', saveAccountFromForm);
     $('#sam-cancel-edit')?.addEventListener('click', clearForm);

@@ -124,9 +124,58 @@
   gap: 0.3em 0.6em;
   margin-bottom: 0.7em;
 }
-#st-api-account-manager .sam-section-heading h4 { color: var(--sam-text); font-size: 0.9em; font-weight: 700; }
+#st-api-account-manager .sam-section-heading h4 {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  color: var(--sam-text);
+  font-size: 0.9em;
+  font-weight: 700;
+}
+/* Only the two top-level section titles carry an accent, regardless of theme h4 styling. */
+#st-api-account-manager .sam-section-heading h4::before,
+#st-api-account-manager .sam-section-heading h4::after { content: none; display: none; }
+#st-api-account-manager .sam-section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+}
+#st-api-account-manager .sam-section-title::before {
+  content: '';
+  flex: 0 0 3px;
+  width: 3px;
+  height: 0.9em;
+  background: var(--sam-accent);
+}
 #st-api-account-manager .sam-section-heading > span { color: var(--sam-muted); font-size: 0.74em; }
 #st-api-account-manager .sam-account-section { min-width: 0; }
+#st-api-account-manager .sam-account-section > .sam-section-heading { align-items: center; }
+#st-api-account-manager .sam-section-heading .sam-accounts-heading { flex: 1 1 auto; min-width: max-content; }
+#st-api-account-manager .sam-accounts-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65em;
+  width: 100%;
+  min-height: 2.85rem;
+  margin: 0;
+  padding: 0.5em 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  box-shadow: none;
+  color: var(--sam-text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  user-select: none;
+}
+#st-api-account-manager .sam-accounts-toggle .sam-section-title { white-space: nowrap; }
+#st-api-account-manager .sam-account-section:has(.sam-accounts-toggle[aria-expanded="false"]) > .sam-section-heading { margin-bottom: 0; }
+#st-api-account-manager .sam-account-section:has(.sam-accounts-toggle[aria-expanded="false"]) .sam-list-toolbar-actions { display: none; }
 #st-api-account-manager .sam-list-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -139,6 +188,7 @@
   align-items: stretch;
   gap: 0.35em;
   min-width: 0;
+  margin-inline-start: auto;
   justify-content: flex-end;
 }
 #st-api-account-manager .sam-search-wrap { position: relative; min-width: 0; }
@@ -576,12 +626,21 @@
 }
 #st-api-account-manager .sam-editor-summary::-webkit-details-marker { display: none; }
 #st-api-account-manager .sam-editor-summary::marker { content: ''; }
-#st-api-account-manager .sam-editor-summary > i {
+#st-api-account-manager .sam-section-chevron {
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  margin-inline: 0.25em;
   color: var(--sam-muted);
-  font-size: 0.72em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   transition: transform 140ms ease;
 }
-#st-api-account-manager .sam-editor[open] > .sam-editor-summary > i { transform: rotate(180deg); }
+#st-api-account-manager .sam-accounts-toggle[aria-expanded="true"] > .sam-section-chevron,
+#st-api-account-manager .sam-editor[open] > .sam-editor-summary > .sam-section-chevron { transform: rotate(180deg); }
 #st-api-account-manager .sam-form {
   min-width: 0;
   padding: 0.75em 0 0;
@@ -680,7 +739,7 @@
 @media (prefers-reduced-motion: reduce) {
   #st-api-account-manager .fa-spin { animation: none; }
   #st-api-account-manager .sam-header-chevron,
-  #st-api-account-manager .sam-editor-summary > i,
+  #st-api-account-manager .sam-section-chevron,
   #st-api-account-manager .sam-switch-track::after { transition: none; }
 }
 #st-api-account-manager .sam-polling-hint {

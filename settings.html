@@ -9,7 +9,7 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.8.3</span>
+        <span>v1.8.4</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
@@ -18,7 +18,12 @@
   <div class="sam-content">
     <section class="sam-account-section" aria-label="账户列表">
       <div class="sam-section-heading">
-        <h4>我的账户</h4>
+        <h4 class="sam-accounts-heading">
+          <button id="sam-accounts-toggle" class="sam-accounts-toggle" type="button" aria-expanded="true" aria-controls="sam-accounts-content">
+            <span class="sam-section-title">我的账户</span>
+            <svg class="sam-section-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4" /></svg>
+          </button>
+        </h4>
         <div class="sam-list-toolbar-actions">
           <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
             <span>重命名</span>
@@ -28,66 +33,68 @@
           </button>
         </div>
       </div>
-      <div class="sam-list-toolbar">
-        <div class="sam-search-wrap">
-          <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-          <input id="sam-account-search" class="text_pole sam-control" type="search" placeholder="搜索站点名称" aria-label="搜索站点名称" aria-controls="sam-account-list" autocomplete="off" spellcheck="false" />
+      <div id="sam-accounts-content">
+        <div class="sam-list-toolbar">
+          <div class="sam-search-wrap">
+            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+            <input id="sam-account-search" class="text_pole sam-control" type="search" placeholder="搜索站点名称" aria-label="搜索站点名称" aria-controls="sam-account-list" autocomplete="off" spellcheck="false" />
+          </div>
+          <span id="sam-search-feedback" class="sam-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span>
+          <div id="sam-account-filters" class="sam-account-filters" role="group" aria-label="账户视图">
+            <button id="sam-filter-all" class="sam-filter-button" type="button" data-filter="all" aria-pressed="true" aria-controls="sam-account-list sam-failover-section">
+              <span>全部 0</span>
+            </button>
+            <button id="sam-filter-favorites" class="sam-filter-button" type="button" data-filter="favorites" aria-pressed="false" aria-controls="sam-account-list sam-failover-section">
+              <i class="fa-solid fa-star" aria-hidden="true"></i><span>收藏 0</span>
+            </button>
+            <div id="sam-group-filter-buttons" class="sam-group-button-track sam-group-filter-buttons" role="group" aria-label="已保存分组"></div>
+          </div>
         </div>
-        <span id="sam-search-feedback" class="sam-visually-hidden" role="status" aria-live="polite" aria-atomic="true"></span>
-        <div id="sam-account-filters" class="sam-account-filters" role="group" aria-label="账户视图">
-          <button id="sam-filter-all" class="sam-filter-button" type="button" data-filter="all" aria-pressed="true" aria-controls="sam-account-list sam-failover-section">
-            <span>全部 0</span>
-          </button>
-          <button id="sam-filter-favorites" class="sam-filter-button" type="button" data-filter="favorites" aria-pressed="false" aria-controls="sam-account-list sam-failover-section">
-            <i class="fa-solid fa-star" aria-hidden="true"></i><span>收藏 0</span>
-          </button>
-          <div id="sam-group-filter-buttons" class="sam-group-button-track sam-group-filter-buttons" role="group" aria-label="已保存分组"></div>
+
+        <div id="sam-group-rename-editor" class="sam-group-rename-editor" role="group" aria-label="重命名当前分组" hidden>
+          <label class="sam-visually-hidden" for="sam-group-rename-input">新的分组名称</label>
+          <input id="sam-group-rename-input" class="text_pole sam-control" type="text" maxlength="60" placeholder="新的分组名称" autocomplete="off" />
+          <button id="sam-group-rename-confirm" class="menu_button sam-button sam-button-small sam-button-primary" type="button">确认</button>
+          <button id="sam-group-rename-cancel" class="menu_button sam-button sam-button-small" type="button">取消</button>
         </div>
-      </div>
 
-      <div id="sam-group-rename-editor" class="sam-group-rename-editor" role="group" aria-label="重命名当前分组" hidden>
-        <label class="sam-visually-hidden" for="sam-group-rename-input">新的分组名称</label>
-        <input id="sam-group-rename-input" class="text_pole sam-control" type="text" maxlength="60" placeholder="新的分组名称" autocomplete="off" />
-        <button id="sam-group-rename-confirm" class="menu_button sam-button sam-button-small sam-button-primary" type="button">确认</button>
-        <button id="sam-group-rename-cancel" class="menu_button sam-button sam-button-small" type="button">取消</button>
-      </div>
+        <section id="sam-failover-section" class="sam-failover-section" aria-label="当前分组的故障切换" hidden>
+          <div class="sam-section-heading"><h4>故障切换</h4><span>生成失败时启用备用 API</span></div>
+          <div class="sam-polling-tools">
+            <span class="sam-runtime-state">
+              <span class="sam-status-dot" aria-hidden="true"></span>
+              <span id="sam-current-group">切换范围：未选择</span>
+            </span>
+            <button id="sam-toggle-polling" class="menu_button sam-button sam-button-small" type="button" aria-pressed="false" disabled>
+              <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启故障切换</span>
+            </button>
+          </div>
+          <p class="sam-polling-hint">正常时保持当前 API；报错后切换，请点击重新生成。</p>
+        </section>
 
-      <section id="sam-failover-section" class="sam-failover-section" aria-label="当前分组的故障切换" hidden>
-        <div class="sam-section-heading"><h4>故障切换</h4><span>生成失败时启用备用 API</span></div>
-        <div class="sam-polling-tools">
-          <span class="sam-runtime-state">
-            <span class="sam-status-dot" aria-hidden="true"></span>
-            <span id="sam-current-group">切换范围：未选择</span>
-          </span>
-          <button id="sam-toggle-polling" class="menu_button sam-button sam-button-small" type="button" aria-pressed="false" disabled>
-            <i class="fa-solid fa-shuffle" aria-hidden="true"></i><span>开启故障切换</span>
-          </button>
+        <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
+          <div class="sam-empty">还没有保存的 API。</div>
         </div>
-        <p class="sam-polling-hint">正常时保持当前 API；报错后切换，请点击重新生成。</p>
-      </section>
 
-      <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
-        <div class="sam-empty">还没有保存的 API。</div>
-      </div>
-
-      <div class="sam-automation-row" aria-label="自动化设置">
-        <label class="sam-switch-row" for="sam-auto-refresh">
-          <input id="sam-auto-refresh" type="checkbox" />
-          <span class="sam-switch-track" aria-hidden="true"></span>
-          <span>自动刷新余额</span>
-        </label>
-        <label class="sam-interval-row" for="sam-refresh-interval">
-          <span>余额</span>
-          <input id="sam-refresh-interval" class="text_pole sam-control sam-number" type="number" min="1" max="1440" step="1" value="30" inputmode="numeric" aria-label="余额刷新间隔（分钟）" />
-          <span>分钟</span>
-        </label>
+        <div class="sam-automation-row" aria-label="自动化设置">
+          <label class="sam-switch-row" for="sam-auto-refresh">
+            <input id="sam-auto-refresh" type="checkbox" />
+            <span class="sam-switch-track" aria-hidden="true"></span>
+            <span>自动刷新余额</span>
+          </label>
+          <label class="sam-interval-row" for="sam-refresh-interval">
+            <span>余额</span>
+            <input id="sam-refresh-interval" class="text_pole sam-control sam-number" type="number" min="1" max="1440" step="1" value="30" inputmode="numeric" aria-label="余额刷新间隔（分钟）" />
+            <span>分钟</span>
+          </label>
+        </div>
       </div>
     </section>
 
     <details id="sam-editor" class="sam-editor" open>
       <summary class="sam-editor-summary">
-        <span id="sam-form-title">添加 API</span>
-        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+        <span id="sam-form-title" class="sam-section-title">添加 API</span>
+        <svg class="sam-section-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4" /></svg>
       </summary>
 
       <form id="sam-account-form" class="sam-form" autocomplete="off">
