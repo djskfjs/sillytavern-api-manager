@@ -191,6 +191,27 @@
   margin-inline-start: auto;
   justify-content: flex-end;
 }
+#st-api-account-manager .sam-sort-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55em;
+  min-width: 0;
+  margin-bottom: 0.7em;
+}
+#st-api-account-manager .sam-sort-row > label {
+  color: var(--sam-muted);
+  font-size: 0.78em;
+  white-space: nowrap;
+}
+#st-api-account-manager .sam-sort-row .sam-control {
+  width: auto;
+  max-width: 100%;
+  min-height: 2.15rem;
+  padding-inline: 0.85em;
+  border-radius: 999px;
+  background: var(--sam-subtle);
+  font-size: 0.78em;
+}
 #st-api-account-manager .sam-search-wrap { position: relative; min-width: 0; }
 #st-api-account-manager .sam-search-wrap > i {
   position: absolute;
@@ -386,7 +407,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-#st-api-account-manager .sam-current-badge {
+#st-api-account-manager .sam-current-badge,
+#st-api-account-manager .sam-polling-badge {
   flex: 0 0 auto;
   padding: 0.18em 0.55em;
   border-radius: 999px;
@@ -394,6 +416,10 @@
   color: var(--sam-accent);
   font-size: 0.68em;
   font-weight: 700;
+}
+#st-api-account-manager .sam-polling-badge {
+  background: var(--sam-subtle-strong);
+  color: var(--sam-muted);
 }
 #st-api-account-manager .sam-account-group {
   margin-top: 0.3em;
@@ -442,16 +468,7 @@
   flex-wrap: wrap;
   gap: 0.4em;
 }
-#st-api-account-manager .sam-balance-settings {
-  min-width: 0;
-  margin-bottom: 0.65em;
-  padding: 0.55em 0;
-}
-#st-api-account-manager .sam-balance-settings > summary {
-  color: var(--sam-text);
-  font-size: 0.82em;
-  cursor: pointer;
-}
+#st-api-account-manager .sam-balance-settings { min-width: 0; }
 #st-api-account-manager .sam-balance-settings .sam-help { overflow-wrap: anywhere; }
 #st-api-account-manager .sam-balance-clear-row {
   display: flex;
@@ -479,7 +496,7 @@
 }
 #st-api-account-manager .sam-account-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.5em;
   margin-top: 0.7em;
   padding-top: 0.15em;
