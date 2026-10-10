@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.9';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.9';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.9';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.10';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.10';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.10';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.9';
+const EXTENSION_VERSION = '1.8.10';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 
@@ -241,6 +241,10 @@ function setKeyVisibility(visible) {
 
 function updateBalanceSettingsUi() {
     const accountMode = $('#sam-balance-mode')?.value === 'account';
+    const help = $('#sam-balance-mode-help');
+    if (help) help.textContent = accountMode
+        ? '填写网站账户访问令牌和用户 ID 后，保存时自动查询余额。'
+        : '根据 API 地址识别账户余额接口，使用已保存的 API Key 查询。';
     const fields = $('#sam-balance-account-fields');
     if (fields) fields.hidden = !accountMode;
     for (const selector of ['#sam-balance-access-token', '#sam-balance-user-id', '#sam-clear-balance-token']) {
@@ -415,22 +419,24 @@ function fillForm(account) {
 function populateModelSelect(models, selected = '') {
     const select = $('#sam-model-select');
     if (!select) return;
+    // A refreshed model list may omit the active model. Opening the editor
+    // must not silently change the connection that an unchanged save keeps.
+    const availableModels = [...models];
+    if (selected && !availableModels.includes(selected)) availableModels.unshift(selected);
     select.replaceChildren();
-    if (!models.length) {
+    if (!selected) {
         const option = document.createElement('option');
         option.value = '';
-        option.textContent = '请先获取模型';
+        option.textContent = availableModels.length ? '未选择模型' : '请先获取模型';
         select.append(option);
-        return;
     }
-    for (const model of models) {
+    for (const model of availableModels) {
         const option = document.createElement('option');
         option.value = model;
         option.textContent = model;
-        option.selected = model === selected;
         select.append(option);
     }
-    if (selected && !models.includes(selected)) select.value = models[0];
+    select.value = selected;
 }
 
 function resolveAccountEndpoint(account) {
@@ -444,7 +450,7 @@ async function requestBalanceJson(url, apiKey, options = {}) {
     try {
         return await requestJson(url, apiKey, { ...options, proxy: false });
     } catch (error) {
-        if (!error?.network) throw error;
+        if (!error?.network && ![502, 503, 504].includes(error?.status)) throw error;
         return requestApiJsonViaSillyTavern(url, apiKey, { ...options, getRequestHeaders });
     }
 }
@@ -615,14 +621,60 @@ async function refreshBalance(account, options = {}) {
 }
 
 async function refreshAllBalances(options = {}) {
-    if (isLoadingBalance || !settings.accounts.length) return;
+    if (isLoadingBalance) return;
+    if (!settings.accounts.length) {
+        if (!options.silent) notify('还没有可刷新余额的账户。');
+        return;
+    }
+    // Start with the visible accounts, then refresh the rest of the saved list.
+    const queue = [...new Set([...listedAccounts(), ...settings.accounts].map(account => account.id))];
     isLoadingBalance = true;
+    const button = $('#sam-refresh-all');
+    let next = 0;
+    let completed = 0;
+    let succeeded = 0;
+    let failed = 0;
+    const showProgress = () => {
+        const label = `刷新中 ${completed}/${queue.length}`;
+        if (button) {
+            button.disabled = true;
+            button.title = label;
+            button.setAttribute('aria-label', label);
+            button.setAttribute('aria-busy', 'true');
+        }
+        setButtonContent(button, 'fa-solid fa-spinner fa-spin', label);
+    };
+    showProgress();
     try {
-        // Sequential requests avoid flooding providers and keep rate limits friendly.
-        for (const account of settings.accounts) await refreshBalance(account, { silent: true });
-        if (!options.silent) notify('余额刷新完成。', 'success');
+        const refreshNext = async () => {
+            while (next < queue.length) {
+                const id = queue[next++];
+                // Read the latest credentials if an account was edited while queued.
+                const account = settings.accounts.find(item => item.id === id);
+                if (account) {
+                    const result = await refreshBalance(account, { silent: true });
+                    if (result?.status === 'ok') succeeded++;
+                    else if (result) failed++;
+                }
+                completed++;
+                showProgress();
+            }
+        };
+        // A slow site must not block every other balance; keep requests bounded.
+        await Promise.all(Array.from({ length: Math.min(3, queue.length) }, refreshNext));
+        if (!options.silent) {
+            notify(`余额刷新完成：${succeeded} 个成功${failed ? `，${failed} 个失败，请查看对应站点提示` : ''}。`,
+                failed ? (succeeded ? 'warning' : 'error') : 'success');
+        }
     } finally {
         isLoadingBalance = false;
+        if (button) {
+            button.disabled = false;
+            button.title = '刷新全部余额';
+            button.setAttribute('aria-label', '刷新全部余额');
+            button.removeAttribute('aria-busy');
+        }
+        setButtonContent(button, 'fa-solid fa-rotate', '刷新余额');
     }
 }
 
@@ -647,7 +699,8 @@ function updateFormBalance() {
     const account = settings.accounts.find(item => item.id === $('#sam-account-id')?.value);
     const output = $('#sam-form-balance');
     if (output) {
-        output.textContent = account ? formatBalance(account.balance) : '账户余额：保存后可查询';
+        output.textContent = account ? formatBalance(account.balance)
+            : $('#sam-balance-mode')?.value === 'account' ? '账户余额：填写网站令牌后，保存时自动查询' : '账户余额：保存后可查询';
         output.dataset.state = account?.balance?.status || 'unknown';
         output.title = account?.balance?.message || '';
     }
@@ -730,7 +783,8 @@ function createAccountCard(account) {
     favorite.dataset.action = 'favorite';
     favorite.dataset.accountId = account.id;
     favorite.textContent = account.favorite ? '★' : '☆';
-    favorite.title = account.favorite ? '取消收藏' : '收藏并置顶';
+    favorite.title = account.favorite ? '取消收藏'
+        : settings.accountFilter.type === 'group' ? '收藏' : '收藏并置顶';
     favorite.setAttribute('aria-label', `${account.favorite ? '取消收藏' : '收藏'} ${account.name}`);
     favorite.setAttribute('aria-pressed', String(account.favorite));
     main.append(titleWrap, favorite);
@@ -857,7 +911,7 @@ function renderGroupSuggestions(selectedGroup) {
 
 function filteredAccounts(accounts, filter) {
     return accounts.filter(account => filter.type === 'all' || accountMatchesFilter(account, filter))
-        .sort((a, b) => Number(b.favorite) - Number(a.favorite)
+        .sort((a, b) => (filter.type === 'group' ? 0 : Number(b.favorite) - Number(a.favorite))
             || (a.group || '未分组').localeCompare(b.group || '未分组')
             || a.name.localeCompare(b.name));
 }
@@ -870,7 +924,7 @@ function listedAccounts() {
         && (!search || account.name.toLocaleLowerCase().includes(search)));
     // The saved array preserves insertion order, even for accounts without timestamps.
     // Sort only this display copy so changing the view does not reorder polling.
-    return accounts.sort((a, b) => Number(b.favorite) - Number(a.favorite)
+    return accounts.sort((a, b) => (filter.type === 'group' ? 0 : Number(b.favorite) - Number(a.favorite))
         || (settings.accountSort === 'added' ? 0 : accountNameCollator.compare(a.name, b.name)));
 }
 
@@ -1148,8 +1202,9 @@ function saveAccountFromForm(event) {
     const existing = index >= 0 ? settings.accounts[index] : null;
     const clearSelected = existing?.id === settings.selectedAccountId
         && !sameAppliedConnection(existing, account);
-    if (index >= 0) settings.accounts[index] = normalizeAccount(account);
-    else settings.accounts.push(normalizeAccount(account));
+    account = normalizeAccount(account);
+    if (index >= 0) settings.accounts[index] = account;
+    else settings.accounts.push(account);
     if (clearSelected) settings.selectedAccountId = '';
     if ((settings.accountFilter.type === 'favorites' && !account.favorite)
         || (settings.accountFilter.type === 'group' && settings.accountFilter.group !== account.group)) {
@@ -1160,6 +1215,9 @@ function saveAccountFromForm(event) {
     clearForm();
     updatePollingState();
     notify(index >= 0 ? '账户已更新。' : '账户已保存。', 'success');
+    if (account.balanceMode === 'account' && account.balanceAccessToken && account.balance.status !== 'ok') {
+        void refreshBalance(account);
+    }
 }
 
 function editAccount(account) {
@@ -1271,8 +1329,8 @@ async function applyToSillyTavern(account, options = {}) {
             baseUrl = result.baseUrl;
             current.baseUrl = displayApiUrl(baseUrl);
             current.resolvedBaseUrl = baseUrl;
-            current.models = result.models;
-            current.selectedModel = current.selectedModel || result.models[0] || '';
+            current.selectedModel ||= result.models[0] || '';
+            current.models = [...new Set([current.selectedModel, ...result.models].filter(Boolean))];
             account = current;
             persist();
         }
@@ -1640,7 +1698,10 @@ function bindEvents() {
         input.focus({ preventScroll: true });
     });
     $('#sam-group')?.addEventListener('input', () => renderGroupSuggestions());
-    $('#sam-balance-mode')?.addEventListener('change', updateBalanceSettingsUi);
+    $('#sam-balance-mode')?.addEventListener('change', () => {
+        updateBalanceSettingsUi();
+        updateFormBalance();
+    });
     $('#sam-balance-access-token')?.addEventListener('input', () => {
         if ($('#sam-clear-balance-token')) $('#sam-clear-balance-token').checked = false;
     });

@@ -9,7 +9,7 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.8.9</span>
+        <span>v1.8.10</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
@@ -165,7 +165,7 @@
             <option value="account" selected>网站账户（中转站）</option>
             <option value="auto">自动识别账户余额接口</option>
           </select>
-          <p id="sam-balance-mode-help" class="sam-help">使用网站账户访问令牌查询余额，也可切换为自动识别。</p>
+          <p id="sam-balance-mode-help" class="sam-help">网站账户模式填写令牌和用户 ID 后，保存时自动查询余额。</p>
         </div>
         <div id="sam-balance-account-fields">
           <div class="sam-field">
@@ -186,7 +186,7 @@
       </div>
 
       <div class="sam-form-balance">
-        <output id="sam-form-balance" class="sam-account-balance" aria-live="polite">账户余额：保存后可查询</output>
+        <output id="sam-form-balance" class="sam-account-balance" aria-live="polite">账户余额：填写网站令牌后，保存时自动查询</output>
         <button id="sam-fetch-balance" class="menu_button sam-button sam-button-small" type="button" disabled>
           <i class="fa-solid fa-wallet" aria-hidden="true"></i><span>查询余额</span>
         </button>

@@ -1,4 +1,4 @@
-import { requestApiJson } from './balance.js?v=1.8.9';
+import { requestApiJson } from './balance.js?v=1.8.10';
 
 const AUTH_STATUSES = new Set([401, 403]);
 const ROUTE_STATUSES = new Set([404, 405, 410, 501]);
@@ -278,32 +278,43 @@ export async function requestApiJsonViaSillyTavern(url, apiKey = '', options = {
     headers.set('Content-Type', 'application/json');
     headers.set('Accept', 'application/json');
     const timeoutMs = Math.max(100, Math.min(60000, Number(options.timeoutMs) || 10000));
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
     target.hash = 'sam-balance-request';
+    const body = JSON.stringify({
+        chat_completion_source: 'custom',
+        custom_url: target.href,
+        custom_include_headers: JSON.stringify(upstreamHeaders),
+    });
     let response;
     let text;
-    try {
-        response = await fetchImpl('/api/backends/chat-completions/status', {
-            method: 'POST', headers, credentials: 'same-origin', cache: 'no-store',
-            redirect: 'error', signal: controller.signal,
-            body: JSON.stringify({
-                chat_completion_source: 'custom',
-                custom_url: target.href,
-                custom_include_headers: JSON.stringify(upstreamHeaders),
-            }),
-        });
-        text = await response.text();
-    } catch {
-        throw failure(controller.signal.aborted ? '酒馆余额查询超时，请稍后重试。' : '无法通过酒馆查询余额，请检查酒馆连接。', { network: true });
-    } finally {
-        clearTimeout(timer);
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            response = await fetchImpl('/api/backends/chat-completions/status', {
+                method: 'POST', headers, credentials: 'same-origin', cache: 'no-store',
+                redirect: 'error', signal: controller.signal, body,
+            });
+            text = await response.text();
+        } catch {
+            throw failure(controller.signal.aborted ? '酒馆余额查询超时，请稍后重试。' : '无法通过酒馆查询余额，请检查酒馆连接。', { network: true });
+        } finally {
+            clearTimeout(timer);
+        }
+        // Only repeat transient gateway failures of this read-only request.
+        // Authentication errors and provider rejections need user attention.
+        if (attempt === 0 && [502, 503, 504].includes(response.status)) {
+            await new Promise(resolve => setTimeout(resolve, 400));
+            continue;
+        }
+        break;
     }
     if (!response.ok) {
         const status = response.status;
         const message = AUTH_STATUSES.has(status)
             ? `酒馆未通过访问认证（HTTP ${status}），请刷新酒馆页面并重新登录。`
-            : `酒馆余额查询失败（HTTP ${status}）。`;
+            : [502, 503, 504].includes(status)
+                ? `余额查询的转发服务暂时不可用（HTTP ${status}，已重试）。若持续失败，请检查酒馆服务器的网络连接。`
+                : `酒馆余额查询失败（HTTP ${status}）。`;
         throw failure(message, { status, nativeUnavailable: [404, 405].includes(status) });
     }
     try {

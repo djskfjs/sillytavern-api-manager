@@ -162,7 +162,7 @@ export async function requestApiJson(url, apiKey = '', options = {}) {
     }
 }
 
-function parseLegacy(payload) {
+function parseDeclaredAccountBalance(payload) {
     const scope = responseScope(payload);
     // Saved field names are not proof of account ownership. Gate all custom
     // responses on an explicit server declaration so a key quota named
@@ -176,16 +176,6 @@ function parseLegacy(payload) {
     // field was returned at all.
     const totals = ['total_balance', 'totalBalance', 'account_balance'].filter(name => Object.prototype.hasOwnProperty.call(data, name));
     const value = totals.length ? totals.map(name => number(data[name])).find(item => item != null) ?? null : number(data?.balance);
-    return accountBalance(value, currency);
-}
-
-function parseDiscoveredBalance(payload) {
-    if (!payload || typeof payload !== 'object' || responseScope(payload) !== 'account') return null;
-    const data = payload?.data && typeof payload.data === 'object' ? payload.data : payload;
-    const currency = data.currency || payload.currency;
-    if (typeof currency !== 'string' || !currency.trim()) return null;
-    const value = ['total_balance', 'totalBalance', 'account_balance', 'balance', 'available_balance']
-        .map(name => number(data[name])).find(item => item != null);
     return accountBalance(value, currency);
 }
 
@@ -251,16 +241,27 @@ function billingBalance(subscription, usage, meta) {
     return accountBalance(value, currency);
 }
 
+function remainingAccountQuota(data) {
+    // New API forks can separate purchased quota from gifts. Their profile
+    // total takes precedence; never add gifts again to an explicit total.
+    if (data?.total_quota != null) return number(data.total_quota);
+    const quota = number(data?.quota);
+    if (quota == null) return null;
+    if (data?.gift_quota == null) return quota;
+    const gift = number(data.gift_quota);
+    return gift == null ? null : number(quota + gift);
+}
+
 /** /api/user/self is authenticated with the website account access token. */
 function siteAccountBalance(payload, meta) {
     const data = payload?.data;
     const id = number(data?.id);
-    const quota = number(data?.quota);
+    const quota = remainingAccountQuota(data);
     if (!Number.isSafeInteger(id) || id <= 0 || quota == null
         || !['', 'account'].includes(responseScope(payload))) return null;
 
-    // The user's quota is already the remaining account balance. used_quota
-    // is historical usage and must not be subtracted a second time.
+    // These fields are remaining quota. used_quota is historical usage and
+    // must not be subtracted a second time.
     if (meta?.type === 'TOKENS') return accountBalance(quota, '额度单位');
     if (meta?.perUnit > 0) {
         const usd = quota / meta.perUnit;
@@ -316,7 +317,7 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
         try { legacy = httpUrl(new URL(account.balanceUrl, `${base.origin}/`).href); } catch { /* invalid legacy URL */ }
         if (legacy?.origin === base.origin) {
             const payload = await attempt(legacy.href);
-            const result = payload && parseLegacy(payload);
+            const result = payload && parseDeclaredAccountBalance(payload);
             if (result) return result;
             if (payload) unprovenBalance = true;
         }
@@ -377,7 +378,7 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
             }
             for (const suffix of ['/balance', '/v1/balance', '/account/balance', '/v1/account/balance']) {
                 const payload = await attempt(`${root}${suffix}`);
-                const result = payload && parseDiscoveredBalance(payload);
+                const result = payload && parseDeclaredAccountBalance(payload);
                 if (result) return result;
                 if (payload) unprovenBalance = true;
             }
