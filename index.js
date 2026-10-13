@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.14';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.14';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.14';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.15';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.15';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.15';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.14';
+const EXTENSION_VERSION = '1.8.15';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 
@@ -27,7 +27,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     refreshInterval: 30,
     pollingEnabled: false,
     pollingFilter: null,
-    quickSwitchVisible: false,
 });
 
 let settings;
@@ -201,7 +200,7 @@ function normalizeSettings(raw) {
         && selectedEntry ? selectedEntry.id : '';
     // Timed rotation and its independent cursor are obsolete. Always start
     // failover from the API that actually handled the failed generation.
-    const { expandedGroups, pollingCursorId, pollingInterval, ...retained } = source;
+    const { expandedGroups, pollingCursorId, pollingInterval, quickSwitchVisible, ...retained } = source;
     return {
         ...DEFAULT_SETTINGS,
         ...retained,
@@ -214,7 +213,6 @@ function normalizeSettings(raw) {
         refreshInterval: clampInteger(source.refreshInterval, 1, 1440, DEFAULT_SETTINGS.refreshInterval),
         pollingEnabled: pollingEnabled && Boolean(pollingFilter),
         pollingFilter,
-        quickSwitchVisible: source.quickSwitchVisible === true,
     };
 }
 
@@ -1014,101 +1012,6 @@ function listedAccounts() {
         || (settings.accountSort === 'added' ? 0 : accountNameCollator.compare(a.name, b.name)));
 }
 
-function quickSwitchAccounts() {
-    return pollingAccounts(viewedPollingFilter());
-}
-
-function updateQuickSwitchUi() {
-    const root = $('#sam-quick-switch');
-    const toggle = $('#sam-quick-switch-toggle');
-    const accounts = quickSwitchAccounts();
-    const current = selectedAccount();
-    const currentIndex = accounts.findIndex(account => account.id === settings.selectedAccountId);
-    if (root) {
-        root.hidden = !settings.quickSwitchVisible || accounts.length < 2;
-        const name = $('#sam-quick-switch-name');
-        const model = $('#sam-quick-switch-model');
-        if (name) name.textContent = current?.name || '未应用站点';
-        if (model) model.textContent = current?.selectedModel || '未选择模型';
-        const canChoose = accounts.length > 1 || (accounts.length === 1 && !current);
-        for (const button of $$('#sam-quick-switch button')) {
-            button.disabled = isApplyingAccount || isFailingOver || generationActive || !canChoose;
-        }
-        const filter = viewedPollingFilter();
-        root.dataset.range = filter ? pollingFilterLabel(filter) : '';
-        root.title = filter
-            ? `快捷切换范围：${pollingFilterLabel(filter)}`
-            : '请在 API 管理页选择具体分组或收藏视图';
-    }
-    const selected = $('#sam-quick-switch-current');
-    if (selected) selected.textContent = currentIndex >= 0 ? `${currentIndex + 1} / ${accounts.length}`
-        : current ? '范围外' : `${accounts.length} 个站点`;
-    if (toggle) {
-        toggle.hidden = accounts.length < 2;
-        toggle.setAttribute('aria-pressed', String(settings.quickSwitchVisible));
-        toggle.setAttribute('aria-expanded', String(settings.quickSwitchVisible));
-        toggle.setAttribute('aria-label', settings.quickSwitchVisible
-            ? '隐藏站点快捷切换浮窗' : '显示站点快捷切换浮窗');
-        toggle.title = settings.quickSwitchVisible ? '隐藏站点快捷切换浮窗' : '显示站点快捷切换浮窗';
-        toggle.classList.toggle('sam-quick-switch-on', settings.quickSwitchVisible);
-    }
-}
-
-function installQuickSwitchUi() {
-    const anchor = $('#leftSendForm');
-    if (!anchor) return false;
-    if (!$('#sam-quick-switch-toggle')) {
-        const toggle = document.createElement('button');
-        toggle.id = 'sam-quick-switch-toggle';
-        toggle.type = 'button';
-        toggle.className = 'sam-quick-switch-toggle interactable fa-solid fa-right-left';
-        toggle.setAttribute('aria-label', '显示站点快捷切换浮窗');
-        toggle.addEventListener('click', () => {
-            settings.quickSwitchVisible = !settings.quickSwitchVisible;
-            persist();
-            updateQuickSwitchUi();
-        });
-        anchor.append(toggle);
-    }
-    if (!$('#sam-quick-switch')) {
-        const root = document.createElement('div');
-        root.id = 'sam-quick-switch';
-        root.setAttribute('role', 'group');
-        root.setAttribute('aria-label', '站点快捷切换');
-        root.innerHTML = `
-            <button type="button" data-direction="-1" aria-label="上一个站点" title="上一个站点">
-                <i class="fa-solid fa-chevron-left" aria-hidden="true"></i><span>上一个</span>
-            </button>
-            <div class="sam-quick-switch-current" aria-live="polite">
-                <span id="sam-quick-switch-name"></span>
-                <span id="sam-quick-switch-model"></span>
-                <span id="sam-quick-switch-current"></span>
-            </div>
-            <button type="button" data-direction="1" aria-label="下一个站点" title="下一个站点">
-                <span>下一个</span><i class="fa-solid fa-chevron-right" aria-hidden="true"></i>
-            </button>`;
-        root.addEventListener('click', event => {
-            const button = event.target.closest('button[data-direction]');
-            if (button) void quickSwitchAccount(Number(button.dataset.direction));
-        });
-        document.body.append(root);
-    }
-    updateQuickSwitchUi();
-    return true;
-}
-
-async function quickSwitchAccount(direction) {
-    if (isApplyingAccount || isFailingOver || generationActive) return;
-    const accounts = quickSwitchAccounts();
-    if (accounts.length < 2) return;
-    const currentIndex = accounts.findIndex(account => account.id === settings.selectedAccountId);
-    const nextIndex = currentIndex < 0
-        ? (direction > 0 ? 0 : accounts.length - 1)
-        : (currentIndex + direction + accounts.length) % accounts.length;
-    const account = accounts[nextIndex];
-    if (account.id !== settings.selectedAccountId) await applyToSillyTavern(account);
-}
-
 function renderAccountFilters() {
     const favoritesButton = $('#sam-filter-favorites');
     const allButton = $('#sam-filter-all');
@@ -1295,7 +1198,6 @@ function updatePollingUi() {
         button.setAttribute('aria-pressed', String(enabled));
         button.classList.toggle('sam-button-primary', enabled);
     }
-    updateQuickSwitchUi();
 }
 
 function renderAccounts() {
@@ -1367,7 +1269,6 @@ function updateAccountSelectionUi() {
         updateAccountModelControl(card, account);
     }
     updatePollingUi();
-    updateQuickSwitchUi();
 }
 
 function saveAccountFromForm(event) {
@@ -1696,7 +1597,6 @@ async function failOverAfterError(snapshot) {
     if (currentIndex < 0 || accounts.length < 2) return updatePollingState();
     const candidates = [...accounts.slice(currentIndex + 1), ...accounts.slice(0, currentIndex)];
     isFailingOver = true;
-    updateQuickSwitchUi();
     try {
         // A candidate can fail address discovery before being applied. Try each
         // remaining candidate at most once; never loop back to the failed API.
@@ -1723,7 +1623,6 @@ async function failOverAfterError(snapshot) {
         if (isCurrentFailure(snapshot)) notify('当前 API 请求失败，范围内的其他 API 均未能应用，请检查连接设置。', 'error');
     } finally {
         isFailingOver = false;
-        updateQuickSwitchUi();
         updatePollingState();
     }
 }
@@ -1743,11 +1642,9 @@ function installGenerationFailover() {
         if (dryRun || type === 'quiet') return;
         invalidateFailover();
         generationActive = true;
-        updateQuickSwitchUi();
     });
     eventSource.on(event_types.GENERATION_ENDED, () => {
         generationActive = false;
-        updateQuickSwitchUi();
         const failure = pendingFailover;
         pendingFailover = null;
         if (!failure) return;
@@ -1761,7 +1658,6 @@ function installGenerationFailover() {
     const stop = () => {
         generationActive = false;
         invalidateFailover();
-        updateQuickSwitchUi();
     };
     eventSource.on(event_types.GENERATION_STOPPED, stop);
     eventSource.on(event_types.CHAT_CHANGED, stop);
@@ -1988,12 +1884,6 @@ async function init() {
         // Wait for the native API connection drawer when it mounts after imports.
         setTimeout(() => init(), 500);
         return;
-    }
-    if (!installQuickSwitchUi()) {
-        const observer = new MutationObserver(() => {
-            if (installQuickSwitchUi()) observer.disconnect();
-        });
-        observer.observe(document.body, { childList: true, subtree: true });
     }
     bindEvents();
     installGenerationFailover();
