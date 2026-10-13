@@ -762,3 +762,97 @@
   color: var(--sam-muted);
   font-size: 0.74em;
 }
+
+/* A compact site switcher that stays beside the chat composer controls. */
+#sam-quick-switch-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 2.15rem;
+  width: 2.15rem;
+  height: 2.15rem;
+  margin-inline-start: 0.2rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--SmartThemeBodyColor, currentColor);
+  cursor: pointer;
+  opacity: 0.78;
+}
+#sam-quick-switch-toggle:hover,
+#sam-quick-switch-toggle.sam-quick-switch-on {
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor, currentColor) 18%, transparent);
+  color: var(--SmartThemeQuoteColor, currentColor);
+  opacity: 1;
+}
+#sam-quick-switch-toggle:focus-visible {
+  outline: 2px solid var(--SmartThemeQuoteColor, currentColor);
+  outline-offset: 2px;
+}
+
+#sam-quick-switch {
+  position: fixed;
+  z-index: 10020;
+  left: max(0.6rem, env(safe-area-inset-left, 0px));
+  bottom: calc(4rem + env(safe-area-inset-bottom, 0px));
+  display: grid;
+  grid-template-columns: auto minmax(5rem, 1fr) auto;
+  align-items: center;
+  gap: 0.45rem;
+  width: min(23rem, calc(100vw - 1.2rem));
+  padding: 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor, CanvasText) 18%, transparent);
+  border-radius: 0.85rem;
+  background: color-mix(in srgb, var(--SmartThemeBlurTintColor, Canvas) 94%, var(--SmartThemeBodyColor, CanvasText) 6%);
+  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 30%);
+  color: var(--SmartThemeBodyColor, CanvasText);
+  font: inherit;
+  line-height: 1.25;
+  backdrop-filter: blur(12px);
+}
+#sam-quick-switch[hidden] { display: none !important; }
+#sam-quick-switch > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  min-width: 4.8rem;
+  min-height: 2.35rem;
+  padding: 0.4rem 0.55rem;
+  border: 0;
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--SmartThemeBodyColor, CanvasText) 9%, transparent);
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+#sam-quick-switch > button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--SmartThemeQuoteColor, currentColor) 20%, transparent);
+}
+#sam-quick-switch > button:disabled { cursor: default; opacity: 0.45; }
+#sam-quick-switch > button:focus-visible {
+  outline: 2px solid var(--SmartThemeQuoteColor, currentColor);
+  outline-offset: 2px;
+}
+#sam-quick-switch .sam-quick-switch-current {
+  display: grid;
+  min-width: 0;
+  gap: 0.12rem;
+  text-align: center;
+}
+#sam-quick-switch-name,
+#sam-quick-switch-model {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#sam-quick-switch-name { font-size: 0.82rem; font-weight: 700; }
+#sam-quick-switch-model,
+#sam-quick-switch-current { color: color-mix(in srgb, var(--SmartThemeBodyColor, CanvasText) 72%, transparent); font-size: 0.68rem; }
+
+@media (max-width: 480px) {
+  #sam-quick-switch { bottom: calc(3.55rem + env(safe-area-inset-bottom, 0px)); }
+  #sam-quick-switch > button { min-width: 4.2rem; padding-inline: 0.4rem; }
+}
