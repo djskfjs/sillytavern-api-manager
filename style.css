@@ -448,18 +448,16 @@
 }
 #st-api-account-manager .sam-account-model-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.45em;
   min-width: 0;
 }
 #st-api-account-manager .sam-account-model-row .sam-button { font-size: 0.95em; }
-#st-api-account-manager .sam-account-model::before {
-  content: '模型';
-  margin-right: 0.7em;
-  color: var(--sam-muted);
-  font: 0.9em sans-serif;
-}
+#st-api-account-manager .sam-account-model-label { color: var(--sam-muted); font-size: 0.9em; }
+#st-api-account-manager .sam-account-model-control { min-width: 0; }
+#st-api-account-manager .sam-account-model { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--sam-text); font-family: ui-monospace, Consolas, monospace; font-size: 0.82em; line-height: 2rem; }
+#st-api-account-manager .sam-account-model-select { min-height: 2rem; padding-block: 0.25em; font-size: 0.82em; }
 #st-api-account-manager .sam-balance-row,
 #st-api-account-manager .sam-form-balance {
   display: flex;

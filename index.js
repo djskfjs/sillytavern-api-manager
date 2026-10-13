@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.10';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.10';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.10';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.12';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.12';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.12';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.10';
+const EXTENSION_VERSION = '1.8.12';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 
@@ -46,6 +46,7 @@ let isApplyingAccount = false;
 let applyingAccountId = '';
 const activeBalanceQueries = new Map();
 const activeModelQueries = new Map();
+const modelChoicesVisibleForAccounts = new Set();
 const accountNameCollator = new Intl.Collator('zh-CN', { numeric: true, sensitivity: 'base' });
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -515,12 +516,84 @@ function updateAccountModelsButton(button, account) {
 function updateAccountModelUi(account) {
     const card = $$('.sam-account-item').find(item => item.dataset.accountId === account.id);
     if (!card) return;
-    const model = $('.sam-account-model', card);
-    if (model) model.textContent = model.title = account.selectedModel || '未选择模型';
+    updateAccountModelControl(card, account);
     const url = $('.sam-account-url', card);
     if (url) url.textContent = url.title = displayApiUrl(account.baseUrl);
     const button = $('button[data-action="models"]', card);
     if (button) updateAccountModelsButton(button, account);
+}
+
+function updateAccountModelControl(card, account) {
+    const model = $('.sam-account-model', card);
+    const select = $('.sam-account-model-select', card);
+    const showChoices = modelChoicesVisibleForAccounts.has(account.id);
+    if (model) {
+        model.textContent = account.selectedModel || '未选择模型';
+        model.title = account.selectedModel || '未选择模型';
+        model.hidden = showChoices;
+    }
+    if (select) {
+        populateAccountModelSelect(select, account);
+        select.hidden = !showChoices;
+    }
+}
+
+function populateAccountModelSelect(select, account) {
+    if (!select || !account) return;
+    const models = [...new Set([...(account.models || []), account.selectedModel].filter(Boolean))];
+    select.replaceChildren();
+    if (!models.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '请先获取模型';
+        select.append(option);
+    } else {
+        for (const model of models) {
+            const option = document.createElement('option');
+            option.value = model;
+            option.textContent = model;
+            select.append(option);
+        }
+    }
+    select.value = account.selectedModel || '';
+    select.disabled = !models.length;
+    select.title = account.selectedModel || '未选择模型';
+    select.setAttribute('aria-label', `${account.name} 的当前模型`);
+}
+
+function selectAccountModel(account, model) {
+    const current = settings.accounts.find(item => item.id === account.id);
+    if (!current) return;
+    const selectedModel = asString(model).trim();
+    if (selectedModel && !current.models.includes(selectedModel)) current.models.push(selectedModel);
+    if (current.selectedModel === selectedModel) return;
+    current.selectedModel = selectedModel;
+    current.updatedAt = Date.now();
+    persist();
+
+    // Keep the editor and SillyTavern's active custom connection in sync when
+    // the model is changed from the account card.
+    if ($('#sam-account-id')?.value === current.id) {
+        const formSelect = $('#sam-model-select');
+        if (formSelect) populateModelSelect(current.models, selectedModel);
+    }
+    if (current.id === settings.selectedAccountId) {
+        invalidateFailover();
+        const nativeSelect = document.querySelector('#model_custom_select');
+        if (nativeSelect && selectedModel && ![...nativeSelect.options].some(option => option.value === selectedModel)) {
+            const option = document.createElement('option');
+            option.value = selectedModel;
+            option.textContent = selectedModel;
+            nativeSelect.append(option);
+        }
+        if (nativeSelect) {
+            nativeSelect.value = selectedModel;
+            nativeSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        setConnectionValue(['#custom_model_id'], selectedModel);
+        if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
+    }
+    updateAccountModelUi(current);
 }
 
 async function fetchModelsForAccount(account) {
@@ -542,6 +615,7 @@ async function fetchModelsForAccount(account) {
             current.resolvedBaseUrl = result.baseUrl;
             current.selectedModel ||= result.models[0] || '';
             current.models = [...new Set([current.selectedModel, ...result.models].filter(Boolean))];
+            modelChoicesVisibleForAccounts.add(current.id);
             current.updatedAt = Date.now();
             if (current.id === settings.selectedAccountId && !sameAppliedConnection(previous, current)) {
                 settings.selectedAccountId = '';
@@ -798,10 +872,18 @@ function createAccountCard(account) {
     url.textContent = displayApiUrl(account.baseUrl) || '未填写 API 地址';
     const modelRow = document.createElement('div');
     modelRow.className = 'sam-account-model-row';
+    const modelLabel = document.createElement('span');
+    modelLabel.className = 'sam-account-model-label';
+    modelLabel.textContent = '模型';
     const model = document.createElement('span');
     model.className = 'sam-account-model';
-    model.title = account.selectedModel || '未选择模型';
-    model.textContent = account.selectedModel || '未选择模型';
+    const modelSelect = document.createElement('select');
+    modelSelect.className = 'text_pole sam-control sam-account-model-select';
+    modelSelect.dataset.action = 'model-select';
+    modelSelect.dataset.accountId = account.id;
+    const modelControl = document.createElement('div');
+    modelControl.className = 'sam-account-model-control';
+    modelControl.append(model, modelSelect);
     const modelsButton = document.createElement('button');
     modelsButton.type = 'button';
     modelsButton.className = 'menu_button sam-button sam-button-small';
@@ -809,9 +891,10 @@ function createAccountCard(account) {
     modelsButton.dataset.accountId = account.id;
     modelsButton.setAttribute('aria-label', `获取 ${account.name} 的模型列表`);
     updateAccountModelsButton(modelsButton, account);
-    modelRow.append(model, modelsButton);
+    modelRow.append(modelLabel, modelControl, modelsButton);
     meta.append(url, modelRow);
     item.append(meta);
+    updateAccountModelControl(item, account);
     const balanceRow = document.createElement('div');
     balanceRow.className = 'sam-balance-row';
     const balance = document.createElement('output');
@@ -1182,8 +1265,7 @@ function updateAccountSelectionUi() {
         } else if (!selected) badge?.remove();
         const button = $('button[data-action="apply"]', card);
         if (button) updateApplyButton(button, account);
-        const model = $('.sam-account-model', card);
-        if (model) model.textContent = model.title = account.selectedModel || '未选择模型';
+        updateAccountModelControl(card, account);
     }
     updatePollingUi();
 }
@@ -1394,6 +1476,12 @@ async function applyToSillyTavern(account, options = {}) {
 }
 
 async function handleAccountAction(event) {
+    const modelSelect = event.target.closest('select[data-action="model-select"]');
+    if (modelSelect) {
+        const account = settings.accounts.find(item => item.id === modelSelect.dataset.accountId);
+        if (account) selectAccountModel(account, modelSelect.value);
+        return;
+    }
     const button = event.target.closest('button[data-action]');
     if (!button) return;
     const account = settings.accounts.find(item => item.id === button.dataset.accountId);
@@ -1666,6 +1754,7 @@ function bindEvents() {
     $('#sam-refresh-all')?.addEventListener('click', () => refreshAllBalances());
     $('#sam-toggle-polling')?.addEventListener('click', togglePolling);
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
+    $('#sam-account-list')?.addEventListener('change', handleAccountAction);
     $('#sam-account-sort')?.addEventListener('change', event => {
         settings.accountSort = event.target.value === 'added' ? 'added' : 'name';
         persist();
