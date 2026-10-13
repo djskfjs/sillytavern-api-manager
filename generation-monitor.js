@@ -96,7 +96,9 @@ function observeBody(response, streaming, fail) {
                 }
             } catch (error) {
                 if (!cancelled) {
-                    fail(error);
+                    // A body read failure is a transport interruption, not an
+                    // upstream API response error. Keep SillyTavern's error,
+                    // but do not queue a polling account switch.
                     controller.error(error);
                     reader.releaseLock();
                 }
@@ -138,7 +140,8 @@ export function createGenerationFetch({ fetch: fetchImpl, origin, capture, onFai
         try {
             response = await fetchImpl.call(this, input, init);
         } catch (error) {
-            fail(error);
+            // Connection failures (for example, the network going offline)
+            // must not rotate accounts. Let the original error propagate.
             throw error;
         }
         if (!response.ok) {

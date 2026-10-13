@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.12';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.12';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.12';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.13';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.13';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.13';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.12';
+const EXTENSION_VERSION = '1.8.13';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 
@@ -268,11 +268,12 @@ function rootElement() {
     return document.getElementById(SETTINGS_ROOT_ID);
 }
 
-function notify(message, kind = 'info') {
+function notify(message, kind = 'info', options = {}) {
     const toaster = globalThis.toastr;
     if (toaster && typeof toaster[kind] === 'function') {
         toaster[kind](message, 'API 账户管理', {
-            escapeHtml: true, closeButton: true, timeOut: 5000, extendedTimeOut: 1500,
+            escapeHtml: true, closeButton: true, tapToDismiss: true,
+            timeOut: 5000, extendedTimeOut: 1500, ...options,
         });
     }
 }
@@ -1611,7 +1612,10 @@ async function failOverAfterError(snapshot) {
                 // API until one of its own future chat requests actually fails.
                 if (settings.pollingEnabled && settings.selectedAccountId === candidate.id
                     && nativeConnectionMatches(candidate)) {
-                    notify(`当前 API 请求失败，已切换到“${candidate.name}” · ${candidate.selectedModel || '未选择模型'}，请重新生成。`, 'success');
+                    notify(`当前 API 请求失败，已切换到“${candidate.name}” · ${candidate.selectedModel || '未选择模型'}，请重新生成。`, 'success', {
+                        timeOut: 0,
+                        extendedTimeOut: 0,
+                    });
                 }
                 return;
             }
