@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.16';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.16';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.16';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.17';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.17';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.17';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.16';
+const EXTENSION_VERSION = '1.8.17';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 const TRANSFER_FORMAT = 'sillytavern-api-account-manager';
@@ -1419,10 +1419,45 @@ function locateSelectedAccount() {
 }
 
 function updateScrollTopButton() {
-    const button = $('#sam-scroll-top');
     const panel = rootElement();
+    const button = ensureScrollTopButton(panel);
     if (!button || !panel) return;
-    button.hidden = panel.open === false;
+    const visible = panel.open === true;
+    button.hidden = !visible;
+    button.style.display = visible ? 'inline-flex' : 'none';
+}
+
+function ensureScrollTopButton(panel = rootElement()) {
+    let button = document.getElementById('sam-scroll-top');
+    if (!button) {
+        button = document.createElement('button');
+        button.id = 'sam-scroll-top';
+        button.className = 'sam-floating-top';
+        button.type = 'button';
+        button.setAttribute('aria-label', '回到页面顶部');
+        button.title = '回到页面顶部';
+        const icon = document.createElement('i');
+        icon.className = 'fa-solid fa-circle-up';
+        icon.setAttribute('aria-hidden', 'true');
+        button.append(icon);
+    }
+    if (button.parentElement !== document.body) document.body.append(button);
+    // Keep this control independent of SillyTavern's button and drawer styles.
+    const visible = panel?.open === true;
+    for (const [property, value] of [
+        ['position', 'fixed'],
+        ['z-index', '2147483000'],
+        ['right', 'max(12px, env(safe-area-inset-right))'],
+        ['bottom', 'max(12px, env(safe-area-inset-bottom))'],
+        ['display', visible ? 'inline-flex' : 'none'],
+        ['visibility', 'visible'],
+        ['opacity', '1'],
+        ['pointer-events', 'auto'],
+        ['background-color', 'rgba(145, 116, 185, 0.9)'],
+        ['border-color', 'rgba(255, 255, 255, 0.35)'],
+        ['color', '#ffffff'],
+    ]) button.style.setProperty(property, value, 'important');
+    return button;
 }
 
 function scrollAccountsToTop() {
@@ -2305,8 +2340,9 @@ function bindEvents() {
         if (list) list.scrollTop = 0;
     });
     $('#sam-locate-selected')?.addEventListener('click', locateSelectedAccount);
-    $('#sam-scroll-top')?.addEventListener('click', scrollAccountsToTop);
     const panel = rootElement();
+    ensureScrollTopButton(panel);
+    $('#sam-scroll-top')?.addEventListener('click', scrollAccountsToTop);
     if (panel && panel.dataset.samScrollTopBound !== 'true') {
         panel.dataset.samScrollTopBound = 'true';
         globalThis.addEventListener?.('scroll', updateScrollTopButton, { capture: true, passive: true });
@@ -2418,10 +2454,7 @@ async function loadPanel() {
         // Available Models is the last field of the native custom form.
         // Insert outside it so the account form is never nested in another form.
         modelForm.after(panel);
-        const scrollTopButton = panel.querySelector('#sam-scroll-top');
-        if (scrollTopButton && scrollTopButton.parentElement !== document.body) {
-            document.body.append(scrollTopButton);
-        }
+        ensureScrollTopButton(panel);
         const styleUrl = new URL('./style.css', import.meta.url);
         styleUrl.searchParams.set('v', EXTENSION_VERSION);
         const styleHref = styleUrl.href;

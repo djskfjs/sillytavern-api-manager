@@ -236,8 +236,8 @@
 .sam-floating-top {
   --sam-floating-accent: var(--SmartThemeQuoteColor, CanvasText);
   --sam-floating-surface: var(--SmartThemeBlurTintColor, Canvas);
-  position: fixed;
-  z-index: 10040;
+  position: fixed !important;
+  z-index: 2147483000 !important;
   right: max(0.7rem, env(safe-area-inset-right));
   bottom: max(0.7rem, env(safe-area-inset-bottom));
   display: inline-flex !important;
@@ -256,6 +256,9 @@
   font-size: 0.95rem;
   line-height: 1;
   cursor: pointer;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 #st-api-account-manager .sam-floating-top > i,
 .sam-floating-top > i { font-size: 1.15em; }
