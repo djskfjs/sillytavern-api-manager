@@ -9,28 +9,36 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.8.15</span>
+        <span>v1.8.16</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
   </summary>
 
   <div class="sam-content">
+    <div id="sam-view-tabs" class="sam-view-tabs" role="tablist" aria-label="API 管理页面">
+      <button id="sam-tab-accounts" class="sam-view-tab" type="button" role="tab" aria-selected="true" aria-controls="sam-view-accounts" tabindex="0">我的账户</button>
+      <button id="sam-tab-editor" class="sam-view-tab" type="button" role="tab" aria-selected="false" aria-controls="sam-view-editor" tabindex="-1"><span id="sam-editor-tab-label">添加 API</span></button>
+    </div>
+
+    <section id="sam-view-accounts" class="sam-view-panel" role="tabpanel" aria-labelledby="sam-tab-accounts" tabindex="0">
     <section class="sam-account-section" aria-label="账户列表">
       <div class="sam-section-heading">
-        <div class="sam-subheading sam-accounts-heading" role="heading" aria-level="4">
-          <button id="sam-accounts-toggle" class="sam-accounts-toggle" type="button" aria-expanded="true" aria-controls="sam-accounts-content">
-            <span class="sam-section-title">我的账户</span>
-            <svg class="sam-section-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4" /></svg>
-          </button>
-        </div>
+        <div class="sam-subheading sam-accounts-heading" role="heading" aria-level="4">已保存的 API</div>
         <div class="sam-list-toolbar-actions">
+          <button id="sam-import-accounts" class="menu_button sam-button sam-button-small" type="button" aria-label="导入 API 配置" title="导入 API 配置">
+            <i class="fa-solid fa-file-import" aria-hidden="true"></i><span>导入</span>
+          </button>
+          <button id="sam-export-accounts" class="menu_button sam-button sam-button-small" type="button" aria-label="导出 API 配置" title="导出 API 配置">
+            <i class="fa-solid fa-file-export" aria-hidden="true"></i><span>导出</span>
+          </button>
           <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
             <span>重命名</span>
           </button>
           <button id="sam-refresh-all" class="menu_button sam-button sam-button-small" type="button" aria-label="刷新全部余额" title="刷新全部余额">
             <i class="fa-solid fa-rotate" aria-hidden="true"></i><span>刷新余额</span>
           </button>
+          <input id="sam-import-file" type="file" accept=".json,application/json" hidden />
         </div>
       </div>
       <div id="sam-accounts-content">
@@ -78,6 +86,9 @@
             <option value="name">按名字排序</option>
             <option value="added">按添加顺序排序</option>
           </select>
+          <button id="sam-locate-selected" class="menu_button sam-button sam-button-small sam-locate-button" type="button" aria-label="定位当前站点" title="定位当前站点">
+            <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i><span>定位</span>
+          </button>
         </div>
 
         <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
@@ -98,14 +109,12 @@
         </div>
       </div>
     </section>
+    </section>
 
-    <details id="sam-editor" class="sam-editor" open>
-      <summary class="sam-editor-summary">
-        <span id="sam-form-title" class="sam-section-title">添加 API</span>
-        <svg class="sam-section-chevron" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="m4 6 4 4 4-4" /></svg>
-      </summary>
-
-      <form id="sam-account-form" class="sam-form" autocomplete="off">
+    <section id="sam-view-editor" class="sam-view-panel" role="tabpanel" aria-labelledby="sam-tab-editor" tabindex="0" hidden>
+    <section id="sam-editor" class="sam-editor" aria-labelledby="sam-form-title">
+      <div class="sam-editor-heading">
+        <div id="sam-form-title" class="sam-editor-title" role="heading" aria-level="4">添加 API</div>
         <div class="sam-form-heading-actions">
           <button id="sam-delete-account" class="menu_button sam-icon-button sam-button-danger" type="button" aria-label="删除账户" title="删除账户" hidden>
             <i class="fa-solid fa-trash-can" aria-hidden="true"></i>
@@ -114,6 +123,9 @@
             <i class="fa-solid fa-xmark" aria-hidden="true"></i>
           </button>
         </div>
+      </div>
+
+      <form id="sam-account-form" class="sam-form" autocomplete="off">
         <input id="sam-account-id" name="accountId" type="hidden" />
 
       <div class="sam-field-grid">
@@ -198,7 +210,11 @@
           </button>
         </div>
       </form>
-    </details>
+    </section>
+    </section>
 
+    <button id="sam-scroll-top" class="sam-floating-top" type="button" aria-label="回到页面顶部" title="回到页面顶部">
+      <i class="fa-solid fa-circle-up" aria-hidden="true"></i>
+    </button>
   </div>
 </details>

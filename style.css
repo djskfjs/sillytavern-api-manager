@@ -112,10 +112,41 @@
 
 #st-api-account-manager .sam-content {
   display: grid;
-  gap: 1.25em;
+  gap: 0.8em;
   min-width: 0;
+  min-height: 0 !important;
   padding: 0.8em;
 }
+#st-api-account-manager .sam-view-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+  border-bottom: 1px solid var(--sam-subtle-strong);
+  background: transparent;
+}
+#st-api-account-manager .sam-view-tab {
+  min-width: 0;
+  min-height: 2.7rem;
+  margin: 0;
+  padding: 0.45em 0.7em;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  box-shadow: none;
+  color: var(--sam-muted);
+  font: inherit;
+  font-size: 0.86em;
+  font-weight: 650;
+  cursor: pointer;
+}
+#st-api-account-manager .sam-view-tab[aria-selected="true"] {
+  border-bottom-color: var(--sam-accent);
+  background: transparent;
+  color: var(--sam-accent);
+}
+#st-api-account-manager .sam-view-panel { min-width: 0; }
 #st-api-account-manager .sam-section-heading {
   display: flex;
   align-items: baseline;
@@ -154,28 +185,6 @@
 #st-api-account-manager .sam-account-section { min-width: 0; }
 #st-api-account-manager .sam-account-section > .sam-section-heading { align-items: center; }
 #st-api-account-manager .sam-section-heading .sam-accounts-heading { flex: 1 1 auto; min-width: max-content; }
-#st-api-account-manager .sam-accounts-toggle {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.65em;
-  width: 100%;
-  min-height: 2.85rem;
-  margin: 0;
-  padding: 0.5em 0;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  box-shadow: none;
-  color: var(--sam-text);
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-  user-select: none;
-}
-#st-api-account-manager .sam-accounts-toggle .sam-section-title { white-space: nowrap; }
-#st-api-account-manager .sam-account-section:has(.sam-accounts-toggle[aria-expanded="false"]) > .sam-section-heading { margin-bottom: 0; }
-#st-api-account-manager .sam-account-section:has(.sam-accounts-toggle[aria-expanded="false"]) .sam-list-toolbar-actions { display: none; }
 #st-api-account-manager .sam-list-toolbar {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -194,6 +203,7 @@
 #st-api-account-manager .sam-sort-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.55em;
   min-width: 0;
   margin-bottom: 0.7em;
@@ -212,6 +222,47 @@
   background: var(--sam-subtle);
   font-size: 0.78em;
 }
+#st-api-account-manager .sam-locate-button {
+  margin-inline-start: auto;
+  border: 1px solid color-mix(in srgb, var(--sam-accent) 34%, transparent);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--sam-accent) 14%, var(--sam-surface));
+  color: var(--sam-accent);
+}
+#st-api-account-manager .sam-account-item.sam-locate-pulse {
+  background: color-mix(in srgb, var(--sam-accent) 22%, var(--sam-surface));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sam-accent) 34%, transparent);
+}
+.sam-floating-top {
+  --sam-floating-accent: var(--SmartThemeQuoteColor, CanvasText);
+  --sam-floating-surface: var(--SmartThemeBlurTintColor, Canvas);
+  position: fixed;
+  z-index: 10040;
+  right: max(0.7rem, env(safe-area-inset-right));
+  bottom: max(0.7rem, env(safe-area-inset-bottom));
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  width: 1.95rem;
+  height: 1.95rem;
+  min-width: 1.95rem;
+  margin: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--sam-floating-accent) 34%, transparent);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--sam-floating-accent) 16%, var(--sam-floating-surface));
+  box-shadow: 0 1px 6px rgb(0 0 0 / 22%);
+  color: var(--sam-floating-accent);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+#st-api-account-manager .sam-floating-top > i,
+.sam-floating-top > i { font-size: 1.15em; }
+.sam-floating-top:hover:enabled {
+  background: color-mix(in srgb, var(--sam-floating-accent) 26%, var(--sam-floating-surface));
+}
+.sam-floating-top[hidden] { display: none !important; }
 #st-api-account-manager .sam-search-wrap { position: relative; min-width: 0; }
 #st-api-account-manager .sam-search-wrap > i {
   position: absolute;
@@ -354,12 +405,8 @@
   display: grid;
   gap: 0.8em;
   min-width: 0;
-  max-height: 29rem;
   padding: 2px;
-  overflow-y: auto;
   overflow-anchor: none;
-  scrollbar-width: thin;
-  scrollbar-color: var(--sam-muted) transparent;
 }
 #st-api-account-manager .sam-empty {
   min-height: 4.5rem;
@@ -380,7 +427,7 @@
   background: var(--sam-card);
 }
 #st-api-account-manager .sam-account-item.sam-selected {
-  background: color-mix(in srgb, var(--sam-accent) 9%, var(--sam-card));
+  background: color-mix(in srgb, var(--sam-accent) 16%, var(--sam-surface));
 }
 #st-api-account-manager .sam-selected .sam-account-name { color: var(--sam-accent); }
 #st-api-account-manager .sam-account-item.sam-editing > :where(.sam-account-meta, .sam-balance-row, .sam-account-time, .sam-account-actions) { display: none; }
@@ -524,6 +571,7 @@
 #st-api-account-manager .sam-icon-button > i {
   flex: 0 0 1em;
   width: 1em;
+  font-size: 0.9em;
   text-align: center;
 }
 #st-api-account-manager .sam-button-small { min-height: 2rem; font-size: 0.76em; }
@@ -557,7 +605,7 @@
   border-radius: 50%;
   background: transparent;
   color: var(--sam-muted);
-  font-size: 1.05em;
+  font-size: 0.95em;
   line-height: 1;
   cursor: pointer;
 }
@@ -625,40 +673,25 @@
 #st-api-account-manager .sam-editor {
   min-width: 0;
 }
-#st-api-account-manager .sam-editor-summary {
+#st-api-account-manager .sam-editor-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 0.8em;
+  min-width: 0;
+  margin-bottom: 0.8em;
+}
+#st-api-account-manager .sam-editor-title {
+  display: inline-flex;
+  align-items: center;
   gap: 0.55em;
-  min-height: 2.85rem;
-  padding: 0.5em 0;
   color: var(--sam-text);
   font-size: 0.9em;
   font-weight: 700;
-  cursor: pointer;
-  list-style: none;
-  user-select: none;
 }
-#st-api-account-manager .sam-editor-summary::-webkit-details-marker { display: none; }
-#st-api-account-manager .sam-editor-summary::marker { content: ''; }
-#st-api-account-manager .sam-section-chevron {
-  flex: 0 0 auto;
-  width: 1em;
-  height: 1em;
-  margin-inline: 0.25em;
-  color: var(--sam-muted);
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 140ms ease;
-}
-#st-api-account-manager .sam-accounts-toggle[aria-expanded="true"] > .sam-section-chevron,
-#st-api-account-manager .sam-editor[open] > .sam-editor-summary > .sam-section-chevron { transform: rotate(180deg); }
 #st-api-account-manager .sam-form {
   min-width: 0;
-  padding: 0.75em 0 0;
+  padding: 0;
 }
 #st-api-account-manager .sam-model-controls {
   display: grid;
@@ -672,7 +705,6 @@
   display: flex;
   justify-content: flex-end;
   gap: 0.35em;
-  margin-bottom: 0.55em;
 }
 #st-api-account-manager .sam-form-heading-actions:not(:has(button:not([hidden]))) { display: none; }
 #st-api-account-manager .sam-field-grid {
@@ -737,6 +769,12 @@
 }
 #st-api-account-manager .sam-form-actions { display: flex; justify-content: flex-end; padding-top: 0.3em; }
 #st-api-account-manager #sam-save-account { width: 100%; min-height: 2.6rem; }
+#st-api-account-manager .sam-account-model-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.35em;
+}
+#st-api-account-manager .sam-account-model-control .sam-model-confirm { width: 100%; min-height: 2rem; }
 
 #st-api-account-manager :where(input, select, button, summary):focus-visible {
   outline: 2px solid var(--sam-accent);
@@ -749,16 +787,82 @@
   #st-api-account-manager .sam-group-editor { grid-template-columns: minmax(0, 1fr); }
   #st-api-account-manager .sam-account-meta { grid-template-columns: minmax(0, 1fr); gap: 0.15em; }
   #st-api-account-manager .sam-account-model { text-align: left; }
+  #st-api-account-manager .sam-view-tab { padding-inline: 0.35em; font-size: 0.8em; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   #st-api-account-manager .fa-spin { animation: none; }
   #st-api-account-manager .sam-header-chevron,
-  #st-api-account-manager .sam-section-chevron,
   #st-api-account-manager .sam-switch-track::after { transition: none; }
 }
 #st-api-account-manager .sam-polling-hint {
   margin-top: 0.6em;
   color: var(--sam-muted);
   font-size: 0.74em;
+}
+
+#sam-chat-quick-switch {
+  --sam-quick-text: var(--SmartThemeBodyColor, CanvasText);
+  --sam-quick-surface: var(--SmartThemeBlurTintColor, Canvas);
+  --sam-quick-accent: var(--SmartThemeQuoteColor, Highlight);
+  position: fixed;
+  z-index: 10050;
+  color: var(--sam-quick-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-shadow: none;
+}
+#sam-chat-quick-switch[hidden] { display: none !important; }
+#sam-quick-switch-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 1px;
+  padding: 3px;
+  border: 1px solid color-mix(in srgb, var(--sam-quick-text) 12%, transparent);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--sam-quick-surface) 93%, transparent);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 22%);
+  backdrop-filter: blur(12px);
+}
+#sam-chat-quick-switch.sam-quick-switch-dragging button { cursor: grabbing; }
+#sam-chat-quick-switch .sam-quick-switch-arrow {
+  font-family: Arial, sans-serif;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+#sam-chat-quick-switch button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  min-height: 1.8rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: none;
+  color: var(--sam-quick-text);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+#sam-chat-quick-switch button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--sam-quick-accent) 18%, transparent);
+}
+#sam-chat-quick-switch button:focus-visible {
+  outline: 2px solid var(--sam-quick-accent);
+  outline-offset: 2px;
+}
+#sam-chat-quick-switch button:disabled { cursor: not-allowed; opacity: 0.48; }
+
+@media (prefers-reduced-motion: reduce) {
+  #sam-chat-quick-switch *,
+  #sam-chat-quick-switch *::before,
+  #sam-chat-quick-switch *::after { scroll-behavior: auto !important; transition: none !important; }
 }
