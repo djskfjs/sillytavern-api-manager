@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.17';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.17';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.17';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.18';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.18';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.18';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.17';
+const EXTENSION_VERSION = '1.8.18';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 const TRANSFER_FORMAT = 'sillytavern-api-account-manager';
@@ -29,7 +29,6 @@ const DEFAULT_SETTINGS = Object.freeze({
     refreshInterval: 30,
     pollingEnabled: false,
     pollingFilter: null,
-    quickSwitchPosition: null,
 });
 
 let settings;
@@ -47,8 +46,8 @@ let isLoadingModels = false;
 let isLoadingBalance = false;
 let isApplyingAccount = false;
 let applyingAccountId = '';
-let quickSwitchDrag = null;
-let quickSwitchSuppressClick = false;
+let scrollTopObserver = null;
+let scrollTopResizeObserver = null;
 const activeBalanceQueries = new Map();
 const activeModelQueries = new Map();
 const modelChoicesVisibleForAccounts = new Set();
@@ -180,13 +179,6 @@ function normalizePollingFilter(filter, accounts) {
     return null;
 }
 
-function normalizeQuickSwitchPosition(value) {
-    const x = Number(value?.x);
-    const y = Number(value?.y);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    return { x: Math.max(0, Math.min(1, x)), y: Math.max(0, Math.min(1, y)) };
-}
-
 function accountMatchesFilter(account, filter) {
     if (!account || !filter) return false;
     return filter.type === 'favorites' ? account.favorite === true
@@ -213,7 +205,7 @@ function normalizeSettings(raw) {
         && selectedEntry ? selectedEntry.id : '';
     // Timed rotation and its independent cursor are obsolete. Always start
     // failover from the API that actually handled the failed generation.
-    const { expandedGroups, pollingCursorId, pollingInterval, quickSwitchVisible, ...retained } = source;
+    const { expandedGroups, pollingCursorId, pollingInterval, quickSwitchVisible, quickSwitchPosition, ...retained } = source;
     return {
         ...DEFAULT_SETTINGS,
         ...retained,
@@ -226,7 +218,6 @@ function normalizeSettings(raw) {
         refreshInterval: clampInteger(source.refreshInterval, 1, 1440, DEFAULT_SETTINGS.refreshInterval),
         pollingEnabled: pollingEnabled && Boolean(pollingFilter),
         pollingFilter,
-        quickSwitchPosition: normalizeQuickSwitchPosition(source.quickSwitchPosition),
     };
 }
 
@@ -578,6 +569,7 @@ function setActiveView(view, { focus = false } = {}) {
         }
         if (panel) panel.hidden = !active;
     }
+    updateScrollTopButton();
     if (focus) (activeView === 'editor' ? $('#sam-name') : $('#sam-tab-accounts'))?.focus({ preventScroll: true });
     if (scrollState) {
         const restore = () => {
@@ -1395,12 +1387,15 @@ function locateSelectedAccount() {
         return;
     }
 
+    const filter = settings.accountFilter;
+    if (filter.type !== 'all' && !accountMatchesFilter(account, filter)) {
+        const scope = filter.type === 'favorites' ? '收藏' : '分组';
+        notify(`已应用的站点“${account.name}”不在当前${scope}中。`, 'info');
+        return;
+    }
+
     const search = $('#sam-account-search');
     if (search) search.value = '';
-    if (settings.accountFilter.type !== 'all') {
-        settings.accountFilter = { type: 'all' };
-        persist();
-    }
     renderAccounts();
 
     const list = $('#sam-account-list');
@@ -1418,57 +1413,165 @@ function locateSelectedAccount() {
     setTimeout(() => card.classList.remove('sam-locate-pulse'), 1200);
 }
 
-function updateScrollTopButton() {
-    const panel = rootElement();
-    const button = ensureScrollTopButton(panel);
-    if (!button || !panel) return;
-    const visible = panel.open === true;
-    button.hidden = !visible;
-    button.style.display = visible ? 'inline-flex' : 'none';
+function scrollTopButtonPosition(panel, accounts) {
+    if (!panel?.open || !accounts || accounts.hidden || !accounts.getClientRects().length) return null;
+    const viewport = globalThis.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const rect = panel.getBoundingClientRect();
+    let left = Math.max(rect.left, viewportLeft);
+    let right = Math.min(rect.right, viewportLeft + (viewport?.width ?? globalThis.innerWidth));
+    let top = Math.max(rect.top, viewportTop);
+    let bottom = Math.min(rect.bottom, viewportTop + (viewport?.height ?? globalThis.innerHeight));
+
+    // A top-layer button must explicitly follow drawer visibility and clipping.
+    // SillyTavern marks a drawer closed before its closing animation finishes.
+    for (let ancestor = accounts; ancestor; ancestor = ancestor.parentElement) {
+        const style = globalThis.getComputedStyle(ancestor);
+        if (ancestor.hidden || ancestor.classList.contains('closedDrawer')
+            || style.display === 'none' || style.visibility !== 'visible'
+            || Number(style.opacity) === 0 || style.contentVisibility === 'hidden') return null;
+        if (ancestor === accounts || ancestor === panel) continue;
+        const bounds = ancestor.getBoundingClientRect();
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
+            left = Math.max(left, bounds.left);
+            right = Math.min(right, bounds.right);
+        }
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) {
+            top = Math.max(top, bounds.top);
+            bottom = Math.min(bottom, bounds.bottom);
+        }
+    }
+
+    const buttonSize = 40;
+    const buttonLeft = rect.right - 12 - buttonSize;
+    // Keep the right edge tied to the extension, even when the drawer moves.
+    // If that part of the extension is offscreen, hide instead of detaching.
+    if (buttonLeft < left || buttonLeft + buttonSize > right || bottom - top < buttonSize + 24) return null;
+    const buttonTop = top + 12 + (bottom - top - buttonSize - 24) * 0.8;
+    return { left: buttonLeft, top: buttonTop };
 }
 
-function ensureScrollTopButton(panel = rootElement()) {
-    let button = document.getElementById('sam-scroll-top');
+function updateScrollTopButton() {
+    const button = document.getElementById('sam-scroll-top') || ensureScrollTopButton();
+    if (!button) return;
+    const panel = rootElement();
+    const position = scrollTopButtonPosition(panel, $('#sam-view-accounts'));
+    if (!position) {
+        if (typeof button.hidePopover === 'function' && button.matches(':popover-open')) button.hidePopover();
+        button.hidden = true;
+        button.setAttribute('aria-hidden', 'true');
+        button.style.setProperty('display', 'none', 'important');
+        return;
+    }
+
+    const theme = globalThis.getComputedStyle(panel);
+    for (const [name, value] of [
+        ['--sam-top-text', theme.getPropertyValue('--sam-text').trim() || theme.color],
+        ['--sam-top-accent', theme.getPropertyValue('--sam-accent').trim() || theme.color],
+        ['position', 'fixed'], ['left', `${position.left}px`], ['top', `${position.top}px`],
+        ['right', 'auto'], ['bottom', 'auto'],
+    ]) button.style.setProperty(name, value, 'important');
+    button.hidden = false;
+    button.setAttribute('aria-hidden', 'false');
+    button.style.setProperty('display', 'grid', 'important');
+    // The browser top layer escapes transformed or clipped theme containers.
+    if (typeof button.showPopover === 'function' && !button.matches(':popover-open')) button.showPopover();
+}
+
+function ensureScrollTopButton() {
+    document.getElementById('sam-scroll-top-layer')?.remove();
+    const mount = rootElement()?.querySelector('#sam-view-accounts');
+    if (!mount) return null;
+    const existingButtons = Array.from(document.querySelectorAll('#sam-scroll-top'));
+    let button = existingButtons.shift() || null;
+    for (const duplicate of existingButtons) duplicate.remove();
     if (!button) {
         button = document.createElement('button');
         button.id = 'sam-scroll-top';
         button.className = 'sam-floating-top';
         button.type = 'button';
-        button.setAttribute('aria-label', '回到页面顶部');
-        button.title = '回到页面顶部';
-        const icon = document.createElement('i');
-        icon.className = 'fa-solid fa-circle-up';
-        icon.setAttribute('aria-hidden', 'true');
-        button.append(icon);
     }
-    if (button.parentElement !== document.body) document.body.append(button);
-    // Keep this control independent of SillyTavern's button and drawer styles.
-    const visible = panel?.open === true;
-    for (const [property, value] of [
-        ['position', 'fixed'],
-        ['z-index', '2147483000'],
-        ['right', 'max(12px, env(safe-area-inset-right))'],
-        ['bottom', 'max(12px, env(safe-area-inset-bottom))'],
-        ['display', visible ? 'inline-flex' : 'none'],
-        ['visibility', 'visible'],
-        ['opacity', '1'],
-        ['pointer-events', 'auto'],
-        ['background-color', 'rgba(145, 116, 185, 0.9)'],
-        ['border-color', 'rgba(255, 255, 255, 0.35)'],
-        ['color', '#ffffff'],
-    ]) button.style.setProperty(property, value, 'important');
+    if (!button.querySelector('svg')) {
+        button.innerHTML = `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="24" cy="24" r="20" />
+            <path d="M24 33V16M17 23l7-7 7 7" />
+        </svg>`;
+    }
+    button.setAttribute('aria-label', '回到扩展顶部');
+    button.title = '回到扩展顶部';
+    button.hidden = true;
+    button.setAttribute('aria-hidden', 'true');
+    button.removeAttribute('style');
+    button.style.setProperty('display', 'none', 'important');
+    if (typeof button.showPopover === 'function') button.setAttribute('popover', 'manual');
+    if (button.dataset.samScrollTopBound !== 'true') {
+        button.dataset.samScrollTopBound = 'true';
+        // Keep the drawer open while activating the floating control.
+        for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
+            button.addEventListener(type, event => event.stopPropagation(), { passive: true });
+        }
+        button.addEventListener('click', scrollAccountsToTop);
+    }
+
+    if (button.parentElement !== mount) mount.append(button);
     return button;
 }
 
-function scrollAccountsToTop() {
-    const scrollContainer = findScrollContainer(rootElement());
+function installScrollTopButton() {
+    const button = ensureScrollTopButton();
+    const observedRoot = document.body || document.documentElement;
+    if (!scrollTopObserver && typeof MutationObserver === 'function' && observedRoot) {
+        scrollTopObserver = new MutationObserver(() => {
+            const current = document.getElementById('sam-scroll-top');
+            const mount = rootElement()?.querySelector('#sam-view-accounts');
+            if (!current || current.parentElement !== mount) ensureScrollTopButton();
+            updateScrollTopButton();
+        });
+    }
+    if (scrollTopObserver) {
+        scrollTopObserver.disconnect();
+        let ancestor = $('#sam-view-accounts') || observedRoot;
+        while (ancestor) {
+            scrollTopObserver.observe(ancestor, { childList: true, attributes: true });
+            ancestor = ancestor.parentElement;
+        }
+    }
+    if (!scrollTopResizeObserver && typeof ResizeObserver === 'function') {
+        scrollTopResizeObserver = new ResizeObserver(updateScrollTopButton);
+    }
+    if (scrollTopResizeObserver) {
+        scrollTopResizeObserver.disconnect();
+        let ancestor = $('#sam-view-accounts');
+        while (ancestor) {
+            scrollTopResizeObserver.observe(ancestor);
+            ancestor = ancestor.parentElement;
+        }
+    }
+    updateScrollTopButton();
+    return button;
+}
+
+function scrollAccountsToTop(event) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    const panel = rootElement();
+    if (!panel?.open || $('#sam-view-accounts')?.hidden) return;
+    const scrollContainer = findScrollContainer(panel);
+    const behavior = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+    const panelTop = panel.getBoundingClientRect().top - 12;
     if (scrollContainer) {
-        if (scrollContainer.scrollTo) scrollContainer.scrollTo({ top: 0, behavior: 'smooth' });
-        else scrollContainer.scrollTop = 0;
+        const top = Math.max(0, scrollContainer.scrollTop + panelTop
+            - scrollContainer.getBoundingClientRect().top - scrollContainer.clientTop);
+        if (scrollContainer.scrollTo) scrollContainer.scrollTo({ top, behavior });
+        else scrollContainer.scrollTop = top;
     } else {
         const scroller = document.scrollingElement;
-        if (scroller?.scrollTo) scroller.scrollTo({ top: 0, behavior: 'smooth' });
-        else globalThis.scrollTo?.({ top: 0, behavior: 'smooth' });
+        const top = Math.max(0, (scroller?.scrollTop ?? globalThis.scrollY ?? 0) + panelTop);
+        if (scroller?.scrollTo) scroller.scrollTo({ top, behavior });
+        else if (globalThis.scrollTo) globalThis.scrollTo({ top, behavior });
+        else if (scroller) scroller.scrollTop = top;
     }
     updateScrollTopButton();
 }
@@ -1536,7 +1639,6 @@ function updatePollingUi() {
         button.setAttribute('aria-pressed', String(enabled));
         button.classList.toggle('sam-button-primary', enabled);
     }
-    updateQuickSwitchUi();
 }
 
 function renderAccounts() {
@@ -1603,210 +1705,6 @@ function updateAccountSelectionUi() {
         updateAccountModelControl(card, account);
     }
     updatePollingUi();
-}
-
-function quickSwitchAccounts() {
-    const filter = viewedPollingFilter();
-    return filter ? pollingAccounts(filter) : [];
-}
-
-function updateQuickSwitchUi() {
-    const widget = $('#sam-chat-quick-switch');
-    if (!widget) return;
-
-    const filter = viewedPollingFilter();
-    const accounts = quickSwitchAccounts();
-    const currentIndex = accounts.findIndex(account => account.id === settings.selectedAccountId);
-    const canSwitch = Boolean(filter && accounts.length > 1 && currentIndex >= 0
-        && !isApplyingAccount && !isFailingOver);
-    // The controls are only useful when there is a real next/previous site.
-    // Keep the widget out of the chat corner when the current view cannot
-    // switch between at least two applied polling accounts.
-    widget.dataset.available = canSwitch ? 'true' : 'false';
-    const previous = $('#sam-quick-switch-previous');
-    const next = $('#sam-quick-switch-next');
-    const previousTarget = currentIndex > 0 ? accounts[currentIndex - 1] : accounts.at(-1);
-    const nextTarget = currentIndex >= 0 ? accounts[(currentIndex + 1) % accounts.length] : null;
-    const rangeLabel = filter ? pollingFilterLabel(filter) : '未选择分组';
-    for (const [button, target, label] of [
-        [previous, previousTarget, '上一个站点'],
-        [next, nextTarget, '下一个站点'],
-    ]) {
-        if (!button) continue;
-        button.disabled = !canSwitch;
-        const title = canSwitch ? `${label}：${target.name}（${rangeLabel}）`
-            : !filter ? '请先在 API 页面选择分组或收藏'
-                : accounts.length < 2 ? '当前范围内至少需要两个参与轮询的站点'
-                    : '请先应用当前范围内的一个站点';
-        button.title = `${title}；长按可拖动浮窗`;
-        button.setAttribute('aria-label', `${label}，长按可拖动浮窗`);
-    }
-    positionQuickSwitch();
-}
-
-function positionQuickSwitch() {
-    const widget = $('#sam-chat-quick-switch');
-    const chat = $('#sheld');
-    if (!widget || !chat) return;
-
-    const rect = chat.getBoundingClientRect();
-    const visible = rect.width > 0 && rect.height > 0
-        && globalThis.getComputedStyle(chat).display !== 'none'
-        && globalThis.getComputedStyle(chat).visibility !== 'hidden';
-    const available = widget.dataset.available === 'true';
-    widget.hidden = !visible || !available;
-    if (!visible || !available) return;
-
-    const widgetRect = widget.getBoundingClientRect();
-    const maxX = Math.max(0, rect.width - widgetRect.width);
-    const maxY = Math.max(0, rect.height - widgetRect.height);
-    const savedPosition = settings.quickSwitchPosition;
-    const offsetX = savedPosition ? savedPosition.x * maxX : Math.min(12, maxX);
-    const offsetY = savedPosition ? savedPosition.y * maxY : maxY - Math.min(12, maxY);
-    const left = Math.max(rect.left, Math.min(rect.left + offsetX, rect.right - widgetRect.width));
-    const top = Math.max(rect.top, Math.min(rect.top + offsetY, rect.bottom - widgetRect.height));
-    widget.style.left = `${left}px`;
-    widget.style.top = `${top}px`;
-    widget.style.bottom = 'auto';
-}
-
-function startQuickSwitchDrag(event) {
-    if (event.button !== 0 || quickSwitchDrag) return;
-    const widget = $('#sam-chat-quick-switch');
-    const chat = $('#sheld');
-    if (!widget || !chat) return;
-
-    const rect = widget.getBoundingClientRect();
-    const drag = quickSwitchDrag = {
-        pointerId: event.pointerId,
-        button: event.currentTarget,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-        startX: event.clientX,
-        startY: event.clientY,
-        moved: false,
-        active: false,
-        timer: null,
-    };
-    drag.timer = window.setTimeout(() => {
-        if (quickSwitchDrag !== drag) return;
-        drag.active = true;
-        drag.button.setPointerCapture?.(drag.pointerId);
-        widget.classList.add('sam-quick-switch-dragging');
-    }, 350);
-}
-
-function moveQuickSwitchDrag(event) {
-    if (!quickSwitchDrag || event.pointerId !== quickSwitchDrag.pointerId) return;
-    const drag = quickSwitchDrag;
-    if (!drag.active) {
-        const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY);
-        if (distance > 8) {
-            window.clearTimeout(drag.timer);
-            quickSwitchDrag = null;
-        }
-        return;
-    }
-    const widget = $('#sam-chat-quick-switch');
-    const chat = $('#sheld');
-    if (!widget || !chat) return;
-
-    const chatRect = chat.getBoundingClientRect();
-    const widgetRect = widget.getBoundingClientRect();
-    const maxX = Math.max(0, chatRect.width - widgetRect.width);
-    const maxY = Math.max(0, chatRect.height - widgetRect.height);
-    const left = Math.max(chatRect.left, Math.min(event.clientX - drag.offsetX, chatRect.left + maxX));
-    const top = Math.max(chatRect.top, Math.min(event.clientY - drag.offsetY, chatRect.top + maxY));
-    if (Math.abs(left - widgetRect.left) + Math.abs(top - widgetRect.top) > 2) drag.moved = true;
-    widget.style.left = `${left}px`;
-    widget.style.top = `${top}px`;
-    widget.style.bottom = 'auto';
-    event.preventDefault();
-}
-
-function finishQuickSwitchDrag(event) {
-    if (!quickSwitchDrag || event.pointerId !== quickSwitchDrag.pointerId) return;
-    const drag = quickSwitchDrag;
-    const widget = $('#sam-chat-quick-switch');
-    const chat = $('#sheld');
-    window.clearTimeout(drag.timer);
-    quickSwitchDrag = null;
-    widget?.classList.remove('sam-quick-switch-dragging');
-    if (!drag.active || !drag.moved || !widget || !chat) return;
-
-    quickSwitchSuppressClick = true;
-    window.setTimeout(() => { quickSwitchSuppressClick = false; }, 0);
-
-    const chatRect = chat.getBoundingClientRect();
-    const widgetRect = widget.getBoundingClientRect();
-    const maxX = Math.max(0, chatRect.width - widgetRect.width);
-    const maxY = Math.max(0, chatRect.height - widgetRect.height);
-    settings.quickSwitchPosition = {
-        x: maxX ? Math.max(0, Math.min(1, (widgetRect.left - chatRect.left) / maxX)) : 0,
-        y: maxY ? Math.max(0, Math.min(1, (widgetRect.top - chatRect.top) / maxY)) : 0,
-    };
-    persist();
-}
-
-function switchQuickSite(direction) {
-    if (isApplyingAccount || isFailingOver) return;
-    const accounts = quickSwitchAccounts();
-    const currentIndex = accounts.findIndex(account => account.id === settings.selectedAccountId);
-    if (accounts.length < 2 || currentIndex < 0) return;
-
-    const index = (currentIndex + direction + accounts.length) % accounts.length;
-    const target = accounts[index];
-    const apply = applyToSillyTavern(target);
-    updateQuickSwitchUi();
-    void apply.finally(updateQuickSwitchUi);
-}
-
-function mountQuickSwitch() {
-    if ($('#sam-chat-quick-switch')) return;
-    const widget = document.createElement('div');
-    widget.id = 'sam-chat-quick-switch';
-    widget.innerHTML = `
-      <div id="sam-quick-switch-controls" role="group" aria-label="快速切换站点">
-        <button id="sam-quick-switch-previous" type="button" aria-label="上一个站点" title="上一个站点">
-          <span class="sam-quick-switch-arrow" aria-hidden="true">↑</span>
-        </button>
-        <button id="sam-quick-switch-next" type="button" aria-label="下一个站点" title="下一个站点">
-          <span class="sam-quick-switch-arrow" aria-hidden="true">↓</span>
-        </button>
-      </div>`;
-    document.body.append(widget);
-
-    for (const [selector, direction] of [
-        ['#sam-quick-switch-previous', -1],
-        ['#sam-quick-switch-next', 1],
-    ]) {
-        const button = $(selector, widget);
-        button?.addEventListener('pointerdown', startQuickSwitchDrag);
-        button?.addEventListener('click', event => {
-            if (quickSwitchSuppressClick) {
-                event.preventDefault();
-                event.stopImmediatePropagation();
-                quickSwitchSuppressClick = false;
-                return;
-            }
-            switchQuickSite(direction);
-        });
-    }
-    document.addEventListener('pointermove', moveQuickSwitchDrag);
-    document.addEventListener('pointerup', finishQuickSwitchDrag);
-    document.addEventListener('pointercancel', finishQuickSwitchDrag);
-
-    window.addEventListener('resize', positionQuickSwitch);
-    window.addEventListener('scroll', positionQuickSwitch, true);
-    if (typeof ResizeObserver === 'function') {
-        const observer = new ResizeObserver(positionQuickSwitch);
-        const chat = $('#sheld');
-        if (chat) observer.observe(chat);
-        observer.observe(widget);
-    }
-    positionQuickSwitch();
-    requestAnimationFrame(positionQuickSwitch);
-    updateQuickSwitchUi();
 }
 
 function saveAccountFromForm(event) {
@@ -2341,8 +2239,7 @@ function bindEvents() {
     });
     $('#sam-locate-selected')?.addEventListener('click', locateSelectedAccount);
     const panel = rootElement();
-    ensureScrollTopButton(panel);
-    $('#sam-scroll-top')?.addEventListener('click', scrollAccountsToTop);
+    installScrollTopButton();
     if (panel && panel.dataset.samScrollTopBound !== 'true') {
         panel.dataset.samScrollTopBound = 'true';
         globalThis.addEventListener?.('scroll', updateScrollTopButton, { capture: true, passive: true });
@@ -2357,6 +2254,8 @@ function bindEvents() {
             scrollContainer = scrollContainer.parentElement;
         }
         globalThis.addEventListener?.('resize', updateScrollTopButton, { passive: true });
+        globalThis.visualViewport?.addEventListener('resize', updateScrollTopButton, { passive: true });
+        globalThis.visualViewport?.addEventListener('scroll', updateScrollTopButton, { passive: true });
         panel.addEventListener('toggle', updateScrollTopButton);
     }
     updateScrollTopButton();
@@ -2454,7 +2353,6 @@ async function loadPanel() {
         // Available Models is the last field of the native custom form.
         // Insert outside it so the account form is never nested in another form.
         modelForm.after(panel);
-        ensureScrollTopButton(panel);
         const styleUrl = new URL('./style.css', import.meta.url);
         styleUrl.searchParams.set('v', EXTENSION_VERSION);
         const styleHref = styleUrl.href;
@@ -2473,6 +2371,7 @@ async function loadPanel() {
 }
 
 async function init() {
+    installScrollTopButton();
     settings = normalizeSettings(extension_settings[EXTENSION_NAME]);
     extension_settings[EXTENSION_NAME] = settings;
     const loaded = await loadPanel();
@@ -2483,10 +2382,12 @@ async function init() {
     }
     bindEvents();
     installGenerationFailover();
-    mountQuickSwitch();
     loadSettingsIntoUi();
     restartRefreshTimer();
 }
+
+// Keep the control hidden until the account view is open and visible.
+installScrollTopButton();
 
 // SillyTavern loads third-party extension entry points as modules.  jQuery is
 // already available globally, but DOMContentLoaded is still useful when the

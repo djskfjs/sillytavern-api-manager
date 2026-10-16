@@ -233,39 +233,42 @@
   background: color-mix(in srgb, var(--sam-accent) 22%, var(--sam-surface));
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--sam-accent) 34%, transparent);
 }
-.sam-floating-top {
-  --sam-floating-accent: var(--SmartThemeQuoteColor, CanvasText);
-  --sam-floating-surface: var(--SmartThemeBlurTintColor, Canvas);
+#sam-scroll-top.sam-floating-top {
+  --sam-top-text: var(--SmartThemeBodyColor, CanvasText);
+  --sam-top-accent: var(--SmartThemeQuoteColor, var(--sam-top-text));
+  all: unset;
+  box-sizing: border-box !important;
   position: fixed !important;
-  z-index: 2147483000 !important;
-  right: max(0.7rem, env(safe-area-inset-right));
-  bottom: max(0.7rem, env(safe-area-inset-bottom));
-  display: inline-flex !important;
-  align-items: center;
-  justify-content: center;
-  width: 1.95rem;
-  height: 1.95rem;
-  min-width: 1.95rem;
-  margin: 0;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--sam-floating-accent) 34%, transparent);
+  z-index: 2147483647 !important;
+  inset: auto !important;
+  transform: none !important;
+  translate: none !important;
+  width: 40px !important;
+  height: 40px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  display: grid !important;
+  place-items: center;
+  border: 0;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--sam-floating-accent) 16%, var(--sam-floating-surface));
-  box-shadow: 0 1px 6px rgb(0 0 0 / 22%);
-  color: var(--sam-floating-accent);
-  font-size: 0.95rem;
-  line-height: 1;
+  background: transparent;
+  color: var(--sam-top-text);
+  box-shadow: none;
   cursor: pointer;
+  touch-action: manipulation;
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: auto !important;
 }
-#st-api-account-manager .sam-floating-top > i,
-.sam-floating-top > i { font-size: 1.15em; }
-.sam-floating-top:hover:enabled {
-  background: color-mix(in srgb, var(--sam-floating-accent) 26%, var(--sam-floating-surface));
+#sam-scroll-top.sam-floating-top[hidden] { display: none !important; }
+#sam-scroll-top.sam-floating-top:hover {
+  color: var(--sam-top-accent);
 }
-.sam-floating-top[hidden] { display: none !important; }
+#sam-scroll-top.sam-floating-top:focus-visible {
+  outline: 2px solid var(--sam-top-text);
+  outline-offset: 3px;
+}
+#sam-scroll-top.sam-floating-top > svg { display: block; width: 100%; height: 100%; pointer-events: none; }
 #st-api-account-manager .sam-search-wrap { position: relative; min-width: 0; }
 #st-api-account-manager .sam-search-wrap > i {
   position: absolute;
@@ -802,70 +805,4 @@
   margin-top: 0.6em;
   color: var(--sam-muted);
   font-size: 0.74em;
-}
-
-#sam-chat-quick-switch {
-  --sam-quick-text: var(--SmartThemeBodyColor, CanvasText);
-  --sam-quick-surface: var(--SmartThemeBlurTintColor, Canvas);
-  --sam-quick-accent: var(--SmartThemeQuoteColor, Highlight);
-  position: fixed;
-  z-index: 10050;
-  color: var(--sam-quick-text);
-  font: inherit;
-  font-size: 13px;
-  line-height: 1.4;
-  text-shadow: none;
-}
-#sam-chat-quick-switch[hidden] { display: none !important; }
-#sam-quick-switch-controls {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 1px;
-  padding: 3px;
-  border: 1px solid color-mix(in srgb, var(--sam-quick-text) 12%, transparent);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--sam-quick-surface) 93%, transparent);
-  box-shadow: 0 2px 10px rgb(0 0 0 / 22%);
-  backdrop-filter: blur(12px);
-}
-#sam-chat-quick-switch.sam-quick-switch-dragging button { cursor: grabbing; }
-#sam-chat-quick-switch .sam-quick-switch-arrow {
-  font-family: Arial, sans-serif;
-  font-size: 1.05rem;
-  line-height: 1;
-}
-#sam-chat-quick-switch button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.8rem;
-  height: 1.8rem;
-  min-height: 1.8rem;
-  margin: 0;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: transparent;
-  box-shadow: none;
-  color: var(--sam-quick-text);
-  font: inherit;
-  font-size: 0.82rem;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-#sam-chat-quick-switch button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--sam-quick-accent) 18%, transparent);
-}
-#sam-chat-quick-switch button:focus-visible {
-  outline: 2px solid var(--sam-quick-accent);
-  outline-offset: 2px;
-}
-#sam-chat-quick-switch button:disabled { cursor: not-allowed; opacity: 0.48; }
-
-@media (prefers-reduced-motion: reduce) {
-  #sam-chat-quick-switch *,
-  #sam-chat-quick-switch *::before,
-  #sam-chat-quick-switch *::after { scroll-behavior: auto !important; transition: none !important; }
 }
