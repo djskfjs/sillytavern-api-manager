@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.19';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.19';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.19';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.20';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.20';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.20';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.19';
+const EXTENSION_VERSION = '1.8.20';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 const TRANSFER_FORMAT = 'sillytavern-api-account-manager';
@@ -1501,7 +1501,7 @@ function scrollTopButtonPosition(panel, accounts) {
     // Keep the right edge tied to the extension, even when the drawer moves.
     // If that part of the extension is offscreen, hide instead of detaching.
     if (buttonLeft < left || buttonLeft + buttonSize > right || bottom - top < buttonSize + 24) return null;
-    const buttonTop = top + 12 + (bottom - top - buttonSize - 24) * 0.8;
+    const buttonTop = top + 12 + (bottom - top - buttonSize - 24) * 0.9;
     return { left: buttonLeft, top: buttonTop };
 }
 

@@ -6,6 +6,6 @@
   "js": "index.js",
   "css": "style.css",
   "author": "SillyTavern API Manager contributors",
-  "version": "1.8.19",
+  "version": "1.8.20",
   "homePage": "https://github.com/djskfjs/sillytavern-api-manager"
 }
