@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.18';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.18';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.18';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.19';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.19';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.19';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.18';
+const EXTENSION_VERSION = '1.8.19';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 const TRANSFER_FORMAT = 'sillytavern-api-account-manager';
@@ -48,6 +48,8 @@ let isApplyingAccount = false;
 let applyingAccountId = '';
 let scrollTopObserver = null;
 let scrollTopResizeObserver = null;
+let apiDrawerWasOpen = false;
+let apiDrawerNavigationRevision = 0;
 const activeBalanceQueries = new Map();
 const activeModelQueries = new Map();
 const modelChoicesVisibleForAccounts = new Set();
@@ -1380,7 +1382,7 @@ function selectedAccount() {
     return settings.accounts.find(account => account.id === settings.selectedAccountId);
 }
 
-function locateSelectedAccount() {
+function locateSelectedAccount({ behavior = 'smooth' } = {}) {
     const account = selectedAccount();
     if (!account) {
         notify('当前没有已应用的站点。', 'warning');
@@ -1405,12 +1407,52 @@ function locateSelectedAccount() {
         return;
     }
     if (typeof card.scrollIntoView === 'function') {
-        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.scrollIntoView({ behavior, block: 'center' });
     }
     card.classList.remove('sam-locate-pulse');
     void card.offsetWidth;
     card.classList.add('sam-locate-pulse');
     setTimeout(() => card.classList.remove('sam-locate-pulse'), 1200);
+}
+
+function syncApiDrawerNavigation() {
+    const panel = rootElement();
+    const drawer = panel?.closest('#rm_api_block');
+    const open = Boolean(drawer?.classList.contains('openDrawer')
+        && !drawer.classList.contains('closedDrawer'));
+    if (open === apiDrawerWasOpen) return;
+    apiDrawerWasOpen = open;
+    const revision = ++apiDrawerNavigationRevision;
+    if (!open || !settings?.selectedAccountId) return;
+
+    const nextFrame = () => new Promise(resolve => globalThis.requestAnimationFrame(resolve));
+    const locateAfterOpening = async () => {
+        await nextFrame();
+        // Wait for the native drawer's opening animation before centering a card.
+        const animations = drawer.getAnimations?.().filter(animation =>
+            Number.isFinite(animation.effect?.getComputedTiming().endTime)) || [];
+        await Promise.allSettled(animations.map(animation => animation.finished));
+        if (revision !== apiDrawerNavigationRevision || !panel.isConnected
+            || !drawer.classList.contains('openDrawer')) return;
+        const host = panel.closest('#openai_api');
+        if (!host?.getClientRects().length || globalThis.getComputedStyle(host).visibility !== 'visible') return;
+        const account = selectedAccount();
+        if (!account) return;
+
+        panel.open = true;
+        setActiveView('accounts');
+        if (settings.accountFilter.type !== 'all' && !accountMatchesFilter(account, settings.accountFilter)) {
+            settings.accountFilter = { type: 'group', group: account.group };
+            persist();
+        }
+        // setActiveView restores the previous scroll over two animation frames.
+        // Center the selected card after that restoration, while this opening is current.
+        await nextFrame();
+        await nextFrame();
+        if (revision !== apiDrawerNavigationRevision || !drawer.classList.contains('openDrawer')) return;
+        locateSelectedAccount({ behavior: 'auto' });
+    };
+    void locateAfterOpening().catch(error => console.error('[API Account Manager] Unable to locate current site', error));
 }
 
 function scrollTopButtonPosition(panel, accounts) {
@@ -1442,6 +1484,17 @@ function scrollTopButtonPosition(panel, accounts) {
             bottom = Math.min(bottom, bounds.bottom);
         }
     }
+
+    // Show after reading the second card, as the third begins to enter view.
+    // Waiting for card two to leave the top would reveal several more cards first.
+    const list = $('#sam-account-list', accounts);
+    const secondCard = list?.querySelectorAll(':scope > .sam-account-item')[1];
+    if (!secondCard) return null;
+    const listClips = /(auto|scroll|hidden|clip)/.test(globalThis.getComputedStyle(list).overflowY);
+    const listBottom = listClips ? Math.min(bottom, list.getBoundingClientRect().bottom) : bottom;
+    const scrollContainer = findScrollContainer(list) || document.scrollingElement;
+    const hasScrolled = list.scrollTop > 0 || (scrollContainer?.scrollTop ?? 0) > 0;
+    if (!hasScrolled || secondCard.getBoundingClientRect().bottom > listBottom) return null;
 
     const buttonSize = 40;
     const buttonLeft = rect.right - 12 - buttonSize;
@@ -1493,7 +1546,7 @@ function ensureScrollTopButton() {
         button.type = 'button';
     }
     if (!button.querySelector('svg')) {
-        button.innerHTML = `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3"
+        button.innerHTML = `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8"
             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
             <circle cx="24" cy="24" r="20" />
             <path d="M24 33V16M17 23l7-7 7 7" />
@@ -1528,6 +1581,7 @@ function installScrollTopButton() {
             const mount = rootElement()?.querySelector('#sam-view-accounts');
             if (!current || current.parentElement !== mount) ensureScrollTopButton();
             updateScrollTopButton();
+            syncApiDrawerNavigation();
         });
     }
     if (scrollTopObserver) {
@@ -1550,6 +1604,7 @@ function installScrollTopButton() {
         }
     }
     updateScrollTopButton();
+    syncApiDrawerNavigation();
     return button;
 }
 
@@ -1672,6 +1727,7 @@ function renderAccounts() {
         list.replaceChildren(...accounts.map(createAccountCard));
     }
     list.scrollTop = scrollTop;
+    updateScrollTopButton();
 }
 
 // Applying an API only changes card state. Keeping the existing list nodes

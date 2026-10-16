@@ -252,7 +252,7 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: var(--sam-top-text);
+  color: var(--sam-top-accent);
   box-shadow: none;
   cursor: pointer;
   touch-action: manipulation;
@@ -261,11 +261,8 @@
   pointer-events: auto !important;
 }
 #sam-scroll-top.sam-floating-top[hidden] { display: none !important; }
-#sam-scroll-top.sam-floating-top:hover {
-  color: var(--sam-top-accent);
-}
 #sam-scroll-top.sam-floating-top:focus-visible {
-  outline: 2px solid var(--sam-top-text);
+  outline: 2px solid var(--sam-top-accent);
   outline-offset: 3px;
 }
 #sam-scroll-top.sam-floating-top > svg { display: block; width: 100%; height: 100%; pointer-events: none; }
