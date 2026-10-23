@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.20';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.20';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.20';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.21';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.21';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.21';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.20';
+const EXTENSION_VERSION = '1.8.21';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 const TRANSFER_FORMAT = 'sillytavern-api-account-manager';
@@ -50,6 +50,8 @@ let scrollTopObserver = null;
 let scrollTopResizeObserver = null;
 let apiDrawerWasOpen = false;
 let apiDrawerNavigationRevision = 0;
+let apiDrawerScrollState = null;
+let apiDrawerScrollRestoring = false;
 const activeBalanceQueries = new Map();
 const activeModelQueries = new Map();
 const modelChoicesVisibleForAccounts = new Set();
@@ -164,6 +166,10 @@ function normalizeAccountFilter(filter, accounts) {
     return { type: 'all' };
 }
 
+function normalizeAccountSort(sort) {
+    return ['name', 'name-desc', 'added', 'added-desc'].includes(sort) ? sort : 'name';
+}
+
 function sameAppliedConnection(left, right) {
     return Boolean(left && right)
         && displayApiUrl(left.baseUrl) === displayApiUrl(right.baseUrl)
@@ -215,7 +221,7 @@ function normalizeSettings(raw) {
         accounts,
         selectedAccountId,
         accountFilter: normalizeAccountFilter(source.accountFilter, accounts),
-        accountSort: source.accountSort === 'added' ? 'added' : 'name',
+        accountSort: normalizeAccountSort(source.accountSort),
         autoRefresh: source.autoRefresh !== false,
         refreshInterval: clampInteger(source.refreshInterval, 1, 1440, DEFAULT_SETTINGS.refreshInterval),
         pollingEnabled: pollingEnabled && Boolean(pollingFilter),
@@ -1255,8 +1261,11 @@ function listedAccounts() {
         && (!search || account.name.toLocaleLowerCase().includes(search)));
     // The saved array preserves insertion order, even for accounts without timestamps.
     // Sort only this display copy so changing the view does not reorder polling.
+    const sortByAdded = settings.accountSort === 'added' || settings.accountSort === 'added-desc';
+    const direction = settings.accountSort.endsWith('-desc') ? -1 : 1;
+    if (sortByAdded && direction === -1) accounts.reverse();
     return accounts.sort((a, b) => (filter.type === 'group' ? 0 : Number(b.favorite) - Number(a.favorite))
-        || (settings.accountSort === 'added' ? 0 : accountNameCollator.compare(a.name, b.name)));
+        || (sortByAdded ? 0 : direction * accountNameCollator.compare(a.name, b.name)));
 }
 
 function renderAccountFilters() {
@@ -1423,39 +1432,48 @@ function syncApiDrawerNavigation() {
     if (open === apiDrawerWasOpen) return;
     apiDrawerWasOpen = open;
     const revision = ++apiDrawerNavigationRevision;
-    if (!open || !settings?.selectedAccountId) return;
+    apiDrawerScrollRestoring = false;
+    if (!open || !apiDrawerScrollState || apiDrawerScrollState.container !== drawer) return;
 
+    const scrollState = apiDrawerScrollState;
+    apiDrawerScrollRestoring = true;
     const nextFrame = () => new Promise(resolve => globalThis.requestAnimationFrame(resolve));
-    const locateAfterOpening = async () => {
+    const restoreAfterOpening = async () => {
         await nextFrame();
-        // Wait for the native drawer's opening animation before centering a card.
+        // Native drawer animations temporarily change its scrollable height.
         const animations = drawer.getAnimations?.().filter(animation =>
             Number.isFinite(animation.effect?.getComputedTiming().endTime)) || [];
         await Promise.allSettled(animations.map(animation => animation.finished));
         if (revision !== apiDrawerNavigationRevision || !panel.isConnected
             || !drawer.classList.contains('openDrawer')) return;
-        const host = panel.closest('#openai_api');
-        if (!host?.getClientRects().length || globalThis.getComputedStyle(host).visibility !== 'visible') return;
-        const account = selectedAccount();
-        if (!account) return;
-
-        panel.open = true;
-        setActiveView('accounts');
-        if (settings.accountFilter.type !== 'all' && !accountMatchesFilter(account, settings.accountFilter)) {
-            settings.accountFilter = { type: 'group', group: account.group };
-            persist();
-        }
-        // setActiveView restores the previous scroll over two animation frames.
-        // Center the selected card after that restoration, while this opening is current.
-        await nextFrame();
-        await nextFrame();
-        if (revision !== apiDrawerNavigationRevision || !drawer.classList.contains('openDrawer')) return;
-        locateSelectedAccount({ behavior: 'auto' });
+        restorePageScroll(scrollState);
+        apiDrawerScrollRestoring = false;
+        rememberApiDrawerScroll();
+        updateScrollTopButton();
     };
-    void locateAfterOpening().catch(error => console.error('[API Account Manager] Unable to locate current site', error));
+    void restoreAfterOpening().catch(error => {
+        if (revision === apiDrawerNavigationRevision) apiDrawerScrollRestoring = false;
+        console.error('[API Account Manager] Unable to restore API panel position', error);
+    });
 }
 
-function scrollTopButtonPosition(panel, accounts) {
+function rememberApiDrawerScroll() {
+    const drawer = rootElement()?.closest('#rm_api_block');
+    if (apiDrawerScrollRestoring || !drawer?.classList.contains('openDrawer')
+        || drawer.classList.contains('closedDrawer') || !drawer.getClientRects().length) return;
+    const animating = drawer.getAnimations?.().some(animation =>
+        animation.playState !== 'finished' && Number.isFinite(animation.effect?.getComputedTiming().endTime));
+    if (animating) return;
+    apiDrawerScrollState = { container: drawer, left: drawer.scrollLeft, top: drawer.scrollTop };
+}
+
+function cancelApiDrawerScrollRestore() {
+    if (!apiDrawerScrollRestoring) return;
+    ++apiDrawerNavigationRevision;
+    apiDrawerScrollRestoring = false;
+}
+
+function scrollTopButtonPosition(panel, accounts, { requireScrolled = true } = {}) {
     if (!panel?.open || !accounts || accounts.hidden || !accounts.getClientRects().length) return null;
     const viewport = globalThis.visualViewport;
     const viewportLeft = viewport?.offsetLeft ?? 0;
@@ -1485,31 +1503,43 @@ function scrollTopButtonPosition(panel, accounts) {
         }
     }
 
-    // Show after reading the second card, as the third begins to enter view.
-    // Waiting for card two to leave the top would reveal several more cards first.
-    const list = $('#sam-account-list', accounts);
-    const secondCard = list?.querySelectorAll(':scope > .sam-account-item')[1];
-    if (!secondCard) return null;
-    const listClips = /(auto|scroll|hidden|clip)/.test(globalThis.getComputedStyle(list).overflowY);
-    const listBottom = listClips ? Math.min(bottom, list.getBoundingClientRect().bottom) : bottom;
-    const scrollContainer = findScrollContainer(list) || document.scrollingElement;
-    const hasScrolled = list.scrollTop > 0 || (scrollContainer?.scrollTop ?? 0) > 0;
-    if (!hasScrolled || secondCard.getBoundingClientRect().bottom > listBottom) return null;
+    if (requireScrolled) {
+        // Show after reading the second card, as the third begins to enter view.
+        const list = $('#sam-account-list', accounts);
+        const secondCard = list?.querySelectorAll(':scope > .sam-account-item')[1];
+        if (!secondCard) return null;
+        const listClips = /(auto|scroll|hidden|clip)/.test(globalThis.getComputedStyle(list).overflowY);
+        const listBottom = listClips ? Math.min(bottom, list.getBoundingClientRect().bottom) : bottom;
+        const scrollContainer = findScrollContainer(list) || document.scrollingElement;
+        const hasScrolled = list.scrollTop > 0 || (scrollContainer?.scrollTop ?? 0) > 0;
+        if (!hasScrolled || secondCard.getBoundingClientRect().bottom > listBottom) return null;
+    }
 
     const buttonSize = 40;
     const buttonLeft = rect.right - 12 - buttonSize;
     // Keep the right edge tied to the extension, even when the drawer moves.
     // If that part of the extension is offscreen, hide instead of detaching.
-    if (buttonLeft < left || buttonLeft + buttonSize > right || bottom - top < buttonSize + 24) return null;
-    const buttonTop = top + 12 + (bottom - top - buttonSize - 24) * 0.9;
+    const stackHeight = buttonSize * 2 + 8;
+    if (buttonLeft < left || buttonLeft + buttonSize > right || bottom - top < stackHeight + 24) return null;
+    const buttonTop = Math.max(top + 12 + buttonSize + 8,
+        top + 12 + (bottom - top - buttonSize - 24) * 0.9);
     return { left: buttonLeft, top: buttonTop };
 }
 
 function updateScrollTopButton() {
     const button = document.getElementById('sam-scroll-top') || ensureScrollTopButton();
     if (!button) return;
+    const locateButton = document.getElementById('sam-locate-selected');
     const panel = rootElement();
     const position = scrollTopButtonPosition(panel, $('#sam-view-accounts'));
+    const locatePosition = scrollTopButtonPosition(panel, $('#sam-view-accounts'), { requireScrolled: false });
+    updateFloatingButton(button, panel, position);
+    updateFloatingButton(locateButton, panel,
+        locatePosition ? { left: locatePosition.left, top: locatePosition.top - 48 } : null);
+}
+
+function updateFloatingButton(button, panel, position) {
+    if (!button) return;
     if (!position) {
         if (typeof button.hidePopover === 'function' && button.matches(':popover-open')) button.hidePopover();
         button.hidden = true;
@@ -1536,6 +1566,7 @@ function ensureScrollTopButton() {
     document.getElementById('sam-scroll-top-layer')?.remove();
     const mount = rootElement()?.querySelector('#sam-view-accounts');
     if (!mount) return null;
+    ensureLocateButton(mount);
     const existingButtons = Array.from(document.querySelectorAll('#sam-scroll-top'));
     let button = existingButtons.shift() || null;
     for (const duplicate of existingButtons) duplicate.remove();
@@ -1565,9 +1596,53 @@ function ensureScrollTopButton() {
         for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
             button.addEventListener(type, event => event.stopPropagation(), { passive: true });
         }
-        button.addEventListener('click', scrollAccountsToTop);
+        button.addEventListener('click', event => {
+            cancelApiDrawerScrollRestore();
+            scrollAccountsToTop(event);
+        });
     }
 
+    if (button.parentElement !== mount) mount.append(button);
+    return button;
+}
+
+function ensureLocateButton(mount) {
+    const existingButtons = Array.from(document.querySelectorAll('#sam-locate-selected'));
+    let button = existingButtons.shift() || null;
+    for (const duplicate of existingButtons) duplicate.remove();
+    if (!button) {
+        button = document.createElement('button');
+        button.id = 'sam-locate-selected';
+        button.type = 'button';
+    }
+    button.className = 'sam-floating-top';
+    if (!button.querySelector('svg')) {
+        button.innerHTML = `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <circle cx="24" cy="24" r="20" />
+            <circle cx="24" cy="24" r="8" />
+            <path d="M24 11v7m0 12v7M11 24h7m12 0h7" />
+        </svg>`;
+    }
+    button.setAttribute('aria-label', '定位当前站点');
+    button.title = '定位当前站点';
+    button.hidden = true;
+    button.setAttribute('aria-hidden', 'true');
+    button.removeAttribute('style');
+    button.style.setProperty('display', 'none', 'important');
+    if (typeof button.showPopover === 'function') button.setAttribute('popover', 'manual');
+    if (button.dataset.samLocateBound !== 'true') {
+        button.dataset.samLocateBound = 'true';
+        for (const type of ['pointerdown', 'mousedown', 'touchstart']) {
+            button.addEventListener(type, event => event.stopPropagation(), { passive: true });
+        }
+        button.addEventListener('click', event => {
+            event.preventDefault();
+            event.stopPropagation();
+            cancelApiDrawerScrollRestore();
+            locateSelectedAccount();
+        });
+    }
     if (button.parentElement !== mount) mount.append(button);
     return button;
 }
@@ -1578,8 +1653,9 @@ function installScrollTopButton() {
     if (!scrollTopObserver && typeof MutationObserver === 'function' && observedRoot) {
         scrollTopObserver = new MutationObserver(() => {
             const current = document.getElementById('sam-scroll-top');
+            const locateButton = document.getElementById('sam-locate-selected');
             const mount = rootElement()?.querySelector('#sam-view-accounts');
-            if (!current || current.parentElement !== mount) ensureScrollTopButton();
+            if (!current || current.parentElement !== mount || !locateButton || locateButton.parentElement !== mount) ensureScrollTopButton();
             updateScrollTopButton();
             syncApiDrawerNavigation();
         });
@@ -1697,6 +1773,9 @@ function updatePollingUi() {
 }
 
 function renderAccounts() {
+    const list = $('#sam-account-list');
+    const scrollState = list ? capturePageScroll(list) : null;
+    const listScrollTop = list?.scrollTop ?? 0;
     const validFilter = normalizeAccountFilter(settings.accountFilter, settings.accounts);
     if (validFilter.type !== settings.accountFilter.type || validFilter.group !== settings.accountFilter.group) {
         settings.accountFilter = validFilter;
@@ -1708,13 +1787,11 @@ function renderAccounts() {
     updateFormBalance();
     if ($('#sam-account-sort')) $('#sam-account-sort').value = settings.accountSort;
     if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
-    const list = $('#sam-account-list');
     if (!list) return;
     const searchQuery = asString($('#sam-account-search')?.value).trim();
     const accounts = listedAccounts();
     const searchFeedback = $('#sam-search-feedback');
     if (searchFeedback) searchFeedback.textContent = searchQuery ? `找到 ${accounts.length} 个匹配的站点` : '';
-    const scrollTop = list.scrollTop;
     if (!accounts.length) {
         const empty = document.createElement('div');
         empty.className = 'sam-empty';
@@ -1726,7 +1803,10 @@ function renderAccounts() {
     } else {
         list.replaceChildren(...accounts.map(createAccountCard));
     }
-    list.scrollTop = scrollTop;
+    // SillyTavern usually scrolls the outer drawer, not the account list itself.
+    // Restore it after rebuilding cards and filters, before any explicit locating.
+    list.scrollTop = listScrollTop;
+    restorePageScroll(scrollState);
     updateScrollTopButton();
 }
 
@@ -1825,8 +1905,8 @@ function deleteAccount(account) {
         settings.selectedAccountId = '';
     }
     persist();
-    if ($('#sam-account-id')?.value === account.id) clearForm();
     renderAccounts();
+    if ($('#sam-account-id')?.value === account.id) clearForm();
     updatePollingState();
     notify('账户已删除。', 'success');
     const focusCard = $$('.sam-account-item').find(item => item.dataset.accountId === focusAccountId);
@@ -2287,18 +2367,24 @@ function bindEvents() {
     $('#sam-account-list')?.addEventListener('click', handleAccountAction);
     $('#sam-account-list')?.addEventListener('change', handleAccountAction);
     $('#sam-account-sort')?.addEventListener('change', event => {
-        settings.accountSort = event.target.value === 'added' ? 'added' : 'name';
+        settings.accountSort = normalizeAccountSort(event.target.value);
         persist();
         renderAccounts();
         const list = $('#sam-account-list');
         if (list) list.scrollTop = 0;
     });
-    $('#sam-locate-selected')?.addEventListener('click', locateSelectedAccount);
     const panel = rootElement();
     installScrollTopButton();
     if (panel && panel.dataset.samScrollTopBound !== 'true') {
         panel.dataset.samScrollTopBound = 'true';
-        globalThis.addEventListener?.('scroll', updateScrollTopButton, { capture: true, passive: true });
+        globalThis.addEventListener?.('scroll', () => {
+            rememberApiDrawerScroll();
+            updateScrollTopButton();
+        }, { capture: true, passive: true });
+        const drawer = panel.closest('#rm_api_block');
+        for (const type of ['wheel', 'touchmove', 'keydown', 'pointerdown']) {
+            drawer?.addEventListener(type, cancelApiDrawerScrollRestore, { passive: true });
+        }
         let scrollContainer = panel.parentElement;
         while (scrollContainer && scrollContainer !== document.body && scrollContainer !== document.documentElement) {
             const style = globalThis.getComputedStyle?.(scrollContainer);

@@ -9,7 +9,7 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.8.20</span>
+        <span>v1.8.21</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
@@ -83,12 +83,11 @@
         <div class="sam-sort-row">
           <label for="sam-account-sort">排序</label>
           <select id="sam-account-sort" class="text_pole sam-control" aria-controls="sam-account-list">
-            <option value="name">按名字排序</option>
-            <option value="added">按添加顺序排序</option>
+            <option value="name">按名字升序</option>
+            <option value="name-desc">按名字降序</option>
+            <option value="added">按添加顺序升序</option>
+            <option value="added-desc">按添加顺序降序</option>
           </select>
-          <button id="sam-locate-selected" class="menu_button sam-button sam-button-small sam-locate-button" type="button" aria-label="定位当前站点" title="定位当前站点">
-            <i class="fa-solid fa-location-crosshairs" aria-hidden="true"></i><span>定位</span>
-          </button>
         </div>
 
         <div id="sam-account-list" class="sam-account-list" role="list" aria-label="已保存的 API">
@@ -213,6 +212,13 @@
     </section>
     </section>
 
+    <button id="sam-locate-selected" class="sam-floating-top" type="button" aria-label="定位当前站点" aria-hidden="true" title="定位当前站点" hidden>
+      <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <circle cx="24" cy="24" r="20" />
+        <circle cx="24" cy="24" r="8" />
+        <path d="M24 11v7m0 12v7M11 24h7m12 0h7" />
+      </svg>
+    </button>
     <button id="sam-scroll-top" class="sam-floating-top" type="button" aria-label="回到扩展顶部" aria-hidden="true" title="回到扩展顶部" hidden>
       <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
         <circle cx="24" cy="24" r="20" />
