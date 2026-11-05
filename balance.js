@@ -1,3 +1,5 @@
+import { assertCredentialRequest } from './credential-security.js?v=1.8.22';
+
 /** Account balance protocols; API-key spending limits are never account balances. */
 const PROVIDER_HOSTS = new Map([
     ['api.openai.com', 'openai'],
@@ -76,6 +78,7 @@ function safeError(error, apiKey) {
         status: error?.status,
         unsupported: error?.unsupported === true,
         network: error?.network === true,
+        credentialBlocked: error?.credentialBlocked === true,
         proxyUnavailable: error?.proxyUnavailable === true,
         proxyAuthRequired: error?.proxyAuthRequired === true,
         accountBalanceUnavailable: error?.accountBalanceUnavailable === true,
@@ -92,6 +95,7 @@ function safeError(error, apiKey) {
 export async function requestApiJson(url, apiKey = '', options = {}) {
     const target = httpUrl(url);
     const key = String(apiKey || '').trim();
+    assertCredentialRequest(target.href, key, options);
     if (key && (Array.from(target.searchParams.values()).includes(key)
         || target.pathname.split('/').includes(encodeURIComponent(key)))) {
         throw fail('请从 API 地址中移除密钥，并将其填写在密钥栏。');
@@ -303,6 +307,7 @@ export async function queryBalance(account, { request = requestApiJson } = {}) {
                 .then(payload => assertPayload(payload, credential))
                 .catch(error => {
                     const safe = safeError(safeError(error, apiKey), accessToken);
+                    if (safe.credentialBlocked) throw safe;
                     if (!publicRequest) errors.push(safe);
                     return null;
                 }));

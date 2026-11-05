@@ -9,7 +9,7 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.8.21</span>
+        <span>v1.8.22</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
@@ -35,7 +35,7 @@
           <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
             <span>重命名</span>
           </button>
-          <button id="sam-refresh-all" class="menu_button sam-button sam-button-small" type="button" aria-label="刷新全部余额" title="刷新全部余额">
+          <button id="sam-refresh-all" class="menu_button sam-button sam-button-small" type="button" aria-label="刷新全部余额" title="刷新全部余额" hidden>
             <i class="fa-solid fa-rotate" aria-hidden="true"></i><span>刷新余额</span>
           </button>
           <input id="sam-import-file" type="file" accept=".json,application/json" hidden />
@@ -94,7 +94,7 @@
           <div class="sam-empty">还没有保存的 API。</div>
         </div>
 
-        <div class="sam-automation-row" aria-label="自动化设置">
+        <div id="sam-balance-automation" class="sam-automation-row" aria-label="自动化设置" hidden>
           <label class="sam-switch-row" for="sam-auto-refresh">
             <input id="sam-auto-refresh" type="checkbox" />
             <span class="sam-switch-track" aria-hidden="true"></span>
@@ -167,6 +167,13 @@
             <i class="fa-solid fa-cloud-arrow-down" aria-hidden="true"></i><span>获取模型</span>
           </button>
         </div>
+        <p id="sam-model-source" class="sam-help" hidden></p>
+      </div>
+
+      <div class="sam-field">
+        <label for="sam-model-manual">手动模型 ID（可选）</label>
+        <input id="sam-model-manual" class="text_pole sam-control" type="text" autocomplete="off" spellcheck="false" placeholder="获取失败时，填写站点提供的完整模型 ID" aria-describedby="sam-model-manual-help" />
+        <p id="sam-model-manual-help" class="sam-help">填写后优先使用此模型，保存即可应用，无需先获取列表。基础地址按站点文档填写；未验证的地址默认补 /v1，已含版本号时保留。</p>
       </div>
 
       <div id="sam-balance-settings" class="sam-balance-settings">
@@ -180,9 +187,21 @@
         </div>
         <div id="sam-balance-account-fields">
           <div class="sam-field">
+            <label for="sam-balance-token-storage">系统令牌保存位置</label>
+            <select id="sam-balance-token-storage" class="text_pole sam-control" aria-describedby="sam-balance-storage-help">
+              <option value="device" selected>当前设备（无需密码）</option>
+              <option value="server">酒馆保存（跨设备）</option>
+            </select>
+            <p id="sam-balance-storage-help" class="sam-help">令牌保存在当前浏览器，刷新后仍可用；换设备或清除网站数据后需补填。站点资料仍由酒馆保存。</p>
+          </div>
+          <label id="sam-balance-relay-row" class="sam-balance-clear-row">
+            <input id="sam-balance-allow-server" type="checkbox" />
+            <span>允许经酒馆查询（查询时会把令牌发送给酒馆服务器）</span>
+          </label>
+          <div class="sam-field">
             <label for="sam-balance-access-token">网站账户访问令牌</label>
             <input id="sam-balance-access-token" class="text_pole sam-control" type="password" autocomplete="new-password" spellcheck="false" placeholder="在网站个人设置中获取" aria-describedby="sam-balance-token-help" />
-            <p id="sam-balance-token-help" class="sam-help">在网站的个人设置中生成访问令牌。这里需要账户访问令牌，聊天 API Key 不能代替它。编辑时留空保留已保存的令牌。</p>
+            <p id="sam-balance-token-help" class="sam-help">优先使用只读余额查询令牌。这里需要网站账户令牌，聊天 API Key 不能代替它。编辑时留空保留令牌；设备保存不能防止恶意扩展或被篡改的酒馆网页读取。</p>
           </div>
           <div class="sam-field">
             <label for="sam-balance-user-id">网站用户 ID</label>
@@ -196,7 +215,7 @@
         </div>
       </div>
 
-      <div class="sam-form-balance">
+      <div id="sam-form-balance-row" class="sam-form-balance" hidden>
         <output id="sam-form-balance" class="sam-account-balance" aria-live="polite">账户余额：填写网站令牌后，保存时自动查询</output>
         <button id="sam-fetch-balance" class="menu_button sam-button sam-button-small" type="button" disabled>
           <i class="fa-solid fa-wallet" aria-hidden="true"></i><span>查询余额</span>
