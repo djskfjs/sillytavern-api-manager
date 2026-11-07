@@ -39,6 +39,33 @@
 #st-api-account-manager *::before,
 #st-api-account-manager *::after { box-sizing: border-box; }
 #st-api-account-manager [hidden] { display: none !important; }
+#sam-token-vault-dialog {
+  width: min(28rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow: auto;
+  padding: 1.2rem;
+  border: 1px solid var(--sam-accent);
+  border-radius: 14px;
+  color: var(--sam-text);
+  background: var(--sam-surface);
+}
+#sam-token-vault-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+#sam-token-vault-dialog form { display: grid; gap: 0.9rem; }
+#sam-token-vault-dialog h3 { margin: 0; font-size: 1.1rem; }
+#sam-token-vault-dialog p { font-size: 0.85rem; line-height: 1.5; }
+#sam-token-vault-dialog label { display: grid; gap: 0.35rem; }
+#sam-token-vault-dialog input {
+  width: 100%; min-width: 0; padding: 0.6rem; border: 1px solid var(--sam-muted);
+  border-radius: 8px; color: var(--sam-text); background: var(--sam-subtle);
+}
+#sam-token-vault-dialog button {
+  padding: 0.55rem 0.8rem; border: 0; border-radius: 8px;
+  color: var(--sam-text); background: var(--sam-subtle-strong); cursor: pointer;
+}
+#sam-token-vault-dialog button:disabled { opacity: 0.5; cursor: wait; }
+#sam-token-vault-dialog .sam-vault-actions { display: flex; justify-content: flex-end; gap: 0.6rem; }
+#sam-vault-error { color: var(--sam-danger); font-size: 0.85rem; }
+#sam-vault-reset { font-size: 0.75rem; }
 #st-api-account-manager :where(input, select, button) { font: inherit; letter-spacing: 0; }
 #st-api-account-manager :where(h4, p) { margin: 0; }
 #st-api-account-manager .sam-visually-hidden {

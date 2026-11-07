@@ -37,11 +37,15 @@ export function createDeviceTokenStore({ getStorage = () => globalThis.localStor
 }
 
 export function settingsForServer(settings) {
+    if (settings.accounts.some(account => account.balanceTokenStorage === 'encrypted' && account.balanceAccessToken)) {
+        throw new Error('系统令牌尚未完成加密，已阻止保存明文。');
+    }
     return {
         ...settings,
         accounts: settings.accounts.map(account => ({
             ...account,
-            balanceAccessToken: account.balanceTokenStorage === 'device' ? '' : account.balanceAccessToken,
+            balanceAccessToken: ['device', 'encrypted'].includes(account.balanceTokenStorage) ? '' : account.balanceAccessToken,
+            balanceTokenCipher: account.balanceTokenStorage === 'encrypted' ? account.balanceTokenCipher || null : null,
         })),
     };
 }

@@ -9,7 +9,7 @@
       <span class="sam-header-meta">
         <span id="sam-account-count">已保存 0 个</span>
         <span aria-hidden="true">·</span>
-        <span>v1.8.22</span>
+        <span>v1.8.23</span>
       </span>
     </span>
     <span class="sam-header-chevron fa-solid fa-chevron-down" aria-hidden="true"></span>
@@ -32,6 +32,11 @@
           <button id="sam-export-accounts" class="menu_button sam-button sam-button-small" type="button" aria-label="导出 API 配置" title="导出 API 配置">
             <i class="fa-solid fa-file-export" aria-hidden="true"></i><span>导出</span>
           </button>
+          <button id="sam-token-vault" class="menu_button sam-button sam-button-small" type="button" hidden>
+            <i class="fa-solid fa-lock" aria-hidden="true"></i><span>加密令牌</span>
+          </button>
+          <button id="sam-encrypt-remaining" class="menu_button sam-button sam-button-small" type="button" hidden>加密其余令牌</button>
+          <button id="sam-restore-encrypted" class="menu_button sam-button sam-button-small" type="button" hidden>恢复加密令牌</button>
           <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
             <span>重命名</span>
           </button>
@@ -154,7 +159,6 @@
             <i class="fa-solid fa-eye" aria-hidden="true"></i><span>显示</span>
           </button>
         </div>
-        <p class="sam-help">编辑时留空即保留当前 Key。</p>
       </div>
 
       <div class="sam-field">
@@ -172,8 +176,7 @@
 
       <div class="sam-field">
         <label for="sam-model-manual">手动模型 ID（可选）</label>
-        <input id="sam-model-manual" class="text_pole sam-control" type="text" autocomplete="off" spellcheck="false" placeholder="获取失败时，填写站点提供的完整模型 ID" aria-describedby="sam-model-manual-help" />
-        <p id="sam-model-manual-help" class="sam-help">填写后优先使用此模型，保存即可应用，无需先获取列表。基础地址按站点文档填写；未验证的地址默认补 /v1，已含版本号时保留。</p>
+        <input id="sam-model-manual" class="text_pole sam-control" type="text" autocomplete="off" spellcheck="false" placeholder="获取失败时，填写站点提供的完整模型 ID" />
       </div>
 
       <div id="sam-balance-settings" class="sam-balance-settings">
@@ -188,20 +191,15 @@
         <div id="sam-balance-account-fields">
           <div class="sam-field">
             <label for="sam-balance-token-storage">系统令牌保存位置</label>
-            <select id="sam-balance-token-storage" class="text_pole sam-control" aria-describedby="sam-balance-storage-help">
-              <option value="device" selected>当前设备（无需密码）</option>
-              <option value="server">酒馆保存（跨设备）</option>
+            <select id="sam-balance-token-storage" class="text_pole sam-control">
+              <option value="device" selected>仅此浏览器保存</option>
+              <option value="server">随酒馆同步保存</option>
+              <option value="encrypted">加密同步保存</option>
             </select>
-            <p id="sam-balance-storage-help" class="sam-help">令牌保存在当前浏览器，刷新后仍可用；换设备或清除网站数据后需补填。站点资料仍由酒馆保存。</p>
           </div>
-          <label id="sam-balance-relay-row" class="sam-balance-clear-row">
-            <input id="sam-balance-allow-server" type="checkbox" />
-            <span>允许经酒馆查询（查询时会把令牌发送给酒馆服务器）</span>
-          </label>
           <div class="sam-field">
             <label for="sam-balance-access-token">网站账户访问令牌</label>
-            <input id="sam-balance-access-token" class="text_pole sam-control" type="password" autocomplete="new-password" spellcheck="false" placeholder="在网站个人设置中获取" aria-describedby="sam-balance-token-help" />
-            <p id="sam-balance-token-help" class="sam-help">优先使用只读余额查询令牌。这里需要网站账户令牌，聊天 API Key 不能代替它。编辑时留空保留令牌；设备保存不能防止恶意扩展或被篡改的酒馆网页读取。</p>
+            <input id="sam-balance-access-token" class="text_pole sam-control" type="password" autocomplete="new-password" spellcheck="false" placeholder="在网站个人设置中获取" />
           </div>
           <div class="sam-field">
             <label for="sam-balance-user-id">网站用户 ID</label>
