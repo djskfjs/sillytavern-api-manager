@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.24';
-import { defaultApiEndpoint, displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.24';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.24';
-import { createDeviceTokenStore, settingsForServer } from './token-storage.js?v=1.8.24';
-import { assertCredentialPage, assertCredentialRequest } from './credential-security.js?v=1.8.24';
-import { createTokenVault } from './token-vault.js?v=1.8.24';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.24&rev=balance-options-20261110';
+import { defaultApiEndpoint, displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.24&rev=balance-options-20261110';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.24&rev=balance-options-20261110';
+import { createDeviceTokenStore, settingsForServer } from './token-storage.js?v=1.8.24&rev=balance-options-20261110';
+import { assertCredentialPage, assertCredentialRequest } from './credential-security.js?v=1.8.24&rev=balance-options-20261110';
+import { createTokenVault } from './token-vault.js?v=1.8.24&rev=balance-options-20261110';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
 const EXTENSION_VERSION = '1.8.24';
@@ -311,6 +311,11 @@ function updateBalanceSettingsUi() {
     if (clearRow) clearRow.hidden = !hasBalanceToken(existing);
     const token = $('#sam-balance-access-token');
     if (token) token.placeholder = hasBalanceToken(existing) ? '留空以保留账户访问令牌' : '在网站个人设置中获取';
+    const encryptionAvailable = tokenEncryptionAvailable();
+    const encryptedOption = $('#sam-balance-token-storage option[value="encrypted"]');
+    if (encryptedOption) encryptedOption.disabled = !encryptionAvailable;
+    const encryptionHelp = $('#sam-token-encryption-help');
+    if (encryptionHelp) encryptionHelp.hidden = encryptionAvailable;
 }
 
 function persist() {
@@ -330,15 +335,6 @@ function persist() {
 }
 
 function prepareCredentialSave(accounts) {
-    // Editing/importing chat accounts must work on HTTP cloud taverns too.
-    // Require HTTPS only when introducing or changing a plaintext system token.
-    if (accounts.some(account => {
-        if (!account.balanceAccessToken) return false;
-        const previous = settings.accounts.find(item => item.id === account.id);
-        return !previous || account.balanceAccessToken !== previous.balanceAccessToken
-            || account.balanceTokenStorage !== previous.balanceTokenStorage
-            || account.baseUrl !== previous.baseUrl;
-    })) assertCredentialPage();
     if (accounts.some(account => account.balanceTokenStorage === 'encrypted' && account.balanceAccessToken)) {
         throw new Error('系统令牌尚未完成加密，已停止保存。');
     }
@@ -562,7 +558,7 @@ function readForm() {
     const enteredBalanceToken = asString($('#sam-balance-access-token')?.value).trim();
     const balanceAccessToken = $('#sam-clear-balance-token')?.checked ? ''
         : enteredBalanceToken || (sameService ? existing.balanceAccessToken : '') || '';
-    const storageValue = $('#sam-balance-token-storage')?.value ?? existing?.balanceTokenStorage ?? 'device';
+    const storageValue = $('#sam-balance-token-storage')?.value ?? existing?.balanceTokenStorage ?? 'server';
     const balanceTokenStorage = ['device', 'encrypted'].includes(storageValue) ? storageValue : 'server';
     const balanceTokenCipher = sameService && !$('#sam-clear-balance-token')?.checked ? existing.balanceTokenCipher || null : null;
     const balanceUserId = asString($('#sam-balance-user-id')?.value
@@ -697,7 +693,8 @@ function clearForm() {
     formResolvedConnection = null;
     const form = $('#sam-account-form');
     if (form) form.reset();
-    if ($('#sam-balance-token-storage') && settings.tokenVault) $('#sam-balance-token-storage').value = 'encrypted';
+    if ($('#sam-balance-settings')) $('#sam-balance-settings').open = false;
+    if ($('#sam-token-advanced')) $('#sam-token-advanced').open = false;
     const accountId = $('#sam-account-id');
     if (accountId) accountId.value = '';
     const modelSelect = $('#sam-model-select');
@@ -765,6 +762,8 @@ function fillForm(account) {
     }
     setKeyVisibility(false);
     if ($('#sam-clear-balance-token')) $('#sam-clear-balance-token').checked = false;
+    if ($('#sam-balance-settings')) $('#sam-balance-settings').open = hasBalanceToken(account);
+    if ($('#sam-token-advanced')) $('#sam-token-advanced').open = false;
     updateBalanceSettingsUi();
     updateFormBalance();
     setActiveView('editor');
@@ -818,14 +817,23 @@ function modelFetchFailure(error) {
     return `${error?.message || '获取模型失败。'} 已有模型仍可使用；也可在编辑中手动填写模型 ID 后保存。`;
 }
 
+function tokenEncryptionAvailable() {
+    try {
+        assertCredentialPage();
+        return Boolean(globalThis.crypto?.subtle);
+    } catch { return false; }
+}
+
 function updateTokenVaultUi() {
     const button = $('#sam-token-vault');
     if (button) button.hidden = !settings?.tokenVault && !settings?.accounts.some(hasBalanceToken);
     if (button) setButtonContent(button, 'fa-solid fa-lock', !settings?.tokenVault ? '加密令牌'
         : tokenVault?.unlocked ? '锁定令牌' : '解锁令牌');
+    if (button) button.disabled = !tokenVault?.unlocked && !tokenEncryptionAvailable();
     const migrate = $('#sam-encrypt-remaining');
     if (migrate) migrate.hidden = !settings?.tokenVault
         || !settings.accounts.some(account => account.balanceTokenStorage !== 'encrypted' && account.balanceAccessToken);
+    if (migrate) migrate.disabled = !tokenEncryptionAvailable();
     const restore = $('#sam-restore-encrypted');
     if (restore) {
         const recovery = readEncryptedRecovery();
@@ -3009,9 +3017,6 @@ function bindEvents() {
 }
 
 function loadSettingsIntoUi() {
-    if (settings.tokenVault && !$('#sam-account-id')?.value && $('#sam-balance-token-storage')) {
-        $('#sam-balance-token-storage').value = 'encrypted';
-    }
     const auto = $('#sam-auto-refresh');
     const interval = $('#sam-refresh-interval');
     if (auto) auto.checked = settings.autoRefresh;
@@ -3032,6 +3037,7 @@ async function loadPanel() {
         if (!panel) {
             const panelUrl = new URL('./settings.html', import.meta.url);
             panelUrl.searchParams.set('v', EXTENSION_VERSION);
+            panelUrl.searchParams.set('rev', 'balance-options-20261110');
             const response = await fetch(panelUrl);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const template = document.createElement('template');

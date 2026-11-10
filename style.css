@@ -537,6 +537,20 @@
   gap: 0.4em;
 }
 #st-api-account-manager .sam-balance-settings { min-width: 0; }
+#st-api-account-manager .sam-balance-settings > summary,
+#st-api-account-manager .sam-token-advanced > summary {
+  cursor: pointer;
+  color: var(--sam-muted);
+  font-size: 0.82em;
+  padding-block: 0.5em;
+}
+#st-api-account-manager .sam-balance-settings-content {
+  display: grid;
+  gap: 0.6em;
+  padding-top: 0.4em;
+}
+#st-api-account-manager .sam-token-advanced { margin-top: 0.65em; }
+#st-api-account-manager .sam-token-actions { display: flex; flex-wrap: wrap; gap: 0.5em; }
 #st-api-account-manager .sam-balance-settings .sam-help { overflow-wrap: anywhere; }
 #st-api-account-manager .sam-balance-clear-row {
   display: flex;

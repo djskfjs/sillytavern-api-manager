@@ -1,5 +1,5 @@
-import { requestApiJson } from './balance.js?v=1.8.24';
-import { assertCredentialRequest } from './credential-security.js?v=1.8.24';
+import { requestApiJson } from './balance.js?v=1.8.24&rev=balance-options-20261110';
+import { assertCredentialRequest } from './credential-security.js?v=1.8.24&rev=balance-options-20261110';
 
 const AUTH_STATUSES = new Set([401, 403]);
 const ROUTE_STATUSES = new Set([404, 405, 410, 501]);

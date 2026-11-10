@@ -32,11 +32,6 @@
           <button id="sam-export-accounts" class="menu_button sam-button sam-button-small" type="button" aria-label="导出 API 配置" title="导出 API 配置">
             <i class="fa-solid fa-file-export" aria-hidden="true"></i><span>导出</span>
           </button>
-          <button id="sam-token-vault" class="menu_button sam-button sam-button-small" type="button" hidden>
-            <i class="fa-solid fa-lock" aria-hidden="true"></i><span>加密令牌</span>
-          </button>
-          <button id="sam-encrypt-remaining" class="menu_button sam-button sam-button-small" type="button" hidden>加密其余令牌</button>
-          <button id="sam-restore-encrypted" class="menu_button sam-button sam-button-small" type="button" hidden>恢复加密令牌</button>
           <button id="sam-group-rename-start" class="menu_button sam-button sam-button-small sam-group-rename-start" type="button" aria-controls="sam-group-rename-editor" aria-expanded="false" hidden>
             <span>重命名</span>
           </button>
@@ -179,7 +174,9 @@
         <input id="sam-model-manual" class="text_pole sam-control" type="text" autocomplete="off" spellcheck="false" placeholder="获取失败时，填写站点提供的完整模型 ID" />
       </div>
 
-      <div id="sam-balance-settings" class="sam-balance-settings">
+      <details id="sam-balance-settings" class="sam-balance-settings">
+        <summary>余额查询（可选）</summary>
+        <div class="sam-balance-settings-content">
         <div class="sam-field">
           <label for="sam-balance-mode">站点余额查询</label>
           <select id="sam-balance-mode" class="text_pole sam-control" aria-describedby="sam-balance-mode-help">
@@ -189,14 +186,6 @@
           <p id="sam-balance-mode-help" class="sam-help">网站账户模式填写令牌和用户 ID 后，保存时自动查询余额。</p>
         </div>
         <div id="sam-balance-account-fields">
-          <div class="sam-field">
-            <label for="sam-balance-token-storage">系统令牌保存位置</label>
-            <select id="sam-balance-token-storage" class="text_pole sam-control">
-              <option value="device" selected>仅此浏览器保存</option>
-              <option value="server">随酒馆同步保存</option>
-              <option value="encrypted">加密同步保存</option>
-            </select>
-          </div>
           <div class="sam-field">
             <label for="sam-balance-access-token">网站账户访问令牌</label>
             <input id="sam-balance-access-token" class="text_pole sam-control" type="password" autocomplete="new-password" spellcheck="false" placeholder="在网站个人设置中获取" />
@@ -210,8 +199,27 @@
             <input id="sam-clear-balance-token" type="checkbox" />
             <span>清除已保存的账户访问令牌</span>
           </label>
+          <details id="sam-token-advanced" class="sam-token-advanced">
+            <summary>高级：令牌保存方式</summary>
+            <div class="sam-field">
+              <label for="sam-balance-token-storage">系统令牌保存方式</label>
+              <select id="sam-balance-token-storage" class="text_pole sam-control" aria-describedby="sam-token-storage-help sam-token-encryption-help">
+                <option value="server" selected>随酒馆同步保存</option>
+                <option value="device">仅此浏览器保存</option>
+                <option value="encrypted">加密同步保存</option>
+              </select>
+              <p id="sam-token-storage-help" class="sam-help">已有账户沿用原保存方式；新账户默认随酒馆同步。仅影响查余额用的系统令牌。</p>
+              <p id="sam-token-encryption-help" class="sam-help" hidden>当前酒馆不支持加密同步，需使用 HTTPS 或本机 localhost；普通保存和查询可正常使用。</p>
+            </div>
+            <div class="sam-token-actions">
+              <button id="sam-token-vault" class="menu_button sam-button sam-button-small" type="button" hidden>
+                <i class="fa-solid fa-lock" aria-hidden="true"></i><span>加密令牌</span>
+              </button>
+              <button id="sam-encrypt-remaining" class="menu_button sam-button sam-button-small" type="button" hidden>加密其余令牌</button>
+              <button id="sam-restore-encrypted" class="menu_button sam-button sam-button-small" type="button" hidden>恢复加密令牌</button>
+            </div>
+          </details>
         </div>
-      </div>
 
       <div id="sam-form-balance-row" class="sam-form-balance" hidden>
         <output id="sam-form-balance" class="sam-account-balance" aria-live="polite">账户余额：填写网站令牌后，保存时自动查询</output>
@@ -219,6 +227,8 @@
           <i class="fa-solid fa-wallet" aria-hidden="true"></i><span>查询余额</span>
         </button>
       </div>
+        </div>
+      </details>
 
         <div class="sam-form-actions">
           <button id="sam-save-account" class="menu_button sam-button sam-button-primary" type="submit">

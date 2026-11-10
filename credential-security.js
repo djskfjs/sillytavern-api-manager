@@ -16,11 +16,10 @@ export function assertCredentialPage(location = globalThis.location) {
     if (location?.href) secureUrl(location.href, '酒馆');
 }
 
-export function assertCredentialRequest(value, credential, { location = globalThis.location, credentialType } = {}) {
+export function assertCredentialRequest(value, credential) {
     if (!credential) return;
-    // Chat keys already use SillyTavern's settings and native connection flow.
-    // Only system-token operations require a secure page; all targets still do.
-    if (credentialType !== 'apiKey') assertCredentialPage(location);
+    // Page HTTPS is required only for optional encryption. Ordinary requests
+    // from HTTP taverns still validate the credential destination below.
     const url = secureUrl(value, '站点');
     const secret = String(credential);
     if ([...url.searchParams].some(([name, value]) => /^(?:api[_-]?key|key|token|access[_-]?token|authorization|auth)$/i.test(name)
