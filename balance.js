@@ -1,4 +1,4 @@
-import { assertCredentialRequest } from './credential-security.js?v=1.8.23';
+import { assertCredentialRequest } from './credential-security.js?v=1.8.24';
 
 /** Account balance protocols; API-key spending limits are never account balances. */
 const PROVIDER_HOSTS = new Map([

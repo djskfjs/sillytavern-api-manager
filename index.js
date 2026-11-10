@@ -8,15 +8,15 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.23';
-import { defaultApiEndpoint, displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.23';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.23';
-import { createDeviceTokenStore, settingsForServer } from './token-storage.js?v=1.8.23';
-import { assertCredentialPage, assertCredentialRequest } from './credential-security.js?v=1.8.23';
-import { createTokenVault } from './token-vault.js?v=1.8.23';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.24';
+import { defaultApiEndpoint, displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.24';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.24';
+import { createDeviceTokenStore, settingsForServer } from './token-storage.js?v=1.8.24';
+import { assertCredentialPage, assertCredentialRequest } from './credential-security.js?v=1.8.24';
+import { createTokenVault } from './token-vault.js?v=1.8.24';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.23';
+const EXTENSION_VERSION = '1.8.24';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 const TRANSFER_FORMAT = 'sillytavern-api-account-manager';
@@ -330,7 +330,15 @@ function persist() {
 }
 
 function prepareCredentialSave(accounts) {
-    assertCredentialPage();
+    // Editing/importing chat accounts must work on HTTP cloud taverns too.
+    // Require HTTPS only when introducing or changing a plaintext system token.
+    if (accounts.some(account => {
+        if (!account.balanceAccessToken) return false;
+        const previous = settings.accounts.find(item => item.id === account.id);
+        return !previous || account.balanceAccessToken !== previous.balanceAccessToken
+            || account.balanceTokenStorage !== previous.balanceTokenStorage
+            || account.baseUrl !== previous.baseUrl;
+    })) assertCredentialPage();
     if (accounts.some(account => account.balanceTokenStorage === 'encrypted' && account.balanceAccessToken)) {
         throw new Error('系统令牌尚未完成加密，已停止保存。');
     }
@@ -2443,7 +2451,7 @@ async function applyToSillyTavern(account, options = {}) {
         notify('请先填写并保存有效的 API Key。', 'error');
         return false;
     }
-    try { assertCredentialRequest(account.baseUrl, apiKey); } catch (error) {
+    try { assertCredentialRequest(account.baseUrl, apiKey, { credentialType: 'apiKey' }); } catch (error) {
         notify(error.message, 'error');
         return false;
     }

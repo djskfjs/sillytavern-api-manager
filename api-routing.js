@@ -1,5 +1,5 @@
-import { requestApiJson } from './balance.js?v=1.8.23';
-import { assertCredentialRequest } from './credential-security.js?v=1.8.23';
+import { requestApiJson } from './balance.js?v=1.8.24';
+import { assertCredentialRequest } from './credential-security.js?v=1.8.24';
 
 const AUTH_STATUSES = new Set([401, 403]);
 const ROUTE_STATUSES = new Set([404, 405, 410, 501]);
@@ -184,7 +184,7 @@ export async function resolveApiEndpoint(account, { request = requestApiJson, na
         try {
             // The generic /proxy route can mix upstream and SillyTavern HTTP
             // authentication. Model queries use only the explicit native fallback.
-            const payload = await request(modelsUrl(baseUrl), apiKey, { proxy: false });
+            const payload = await request(modelsUrl(baseUrl), apiKey, { proxy: false, credentialType: 'apiKey' });
             return { baseUrl, models: payloadModels(payload, apiKey) };
         } catch (error) {
             directError = safeFailure(error, apiKey);
@@ -227,7 +227,7 @@ export async function requestModelsViaSillyTavern(baseUrl, apiKey, options = {})
     const key = String(apiKey || '').trim();
     if (!key) throw failure('请先填写有效的 API Key。');
     const base = parseBase(baseUrl, key);
-    assertCredentialRequest(base.href, key, options);
+    assertCredentialRequest(base.href, key, { ...options, credentialType: 'apiKey' });
     if (typeof options.getRequestHeaders !== 'function') {
         throw failure('当前环境无法提供酒馆请求认证，未启用原生模型查询。', { nativeUnavailable: true });
     }
