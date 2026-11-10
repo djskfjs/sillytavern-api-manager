@@ -1,9 +1,7 @@
-import { requestApiJson } from './balance.js?v=1.8.24&rev=balance-options-20261110';
-import { assertCredentialRequest } from './credential-security.js?v=1.8.24&rev=balance-options-20261110';
+import { requestApiJson } from './balance.js?v=1.8.24&rev=before-protection-20261110';
 
 const AUTH_STATUSES = new Set([401, 403]);
 const ROUTE_STATUSES = new Set([404, 405, 410, 501]);
-const GATEWAY_STATUSES = new Set([502, 503, 504]);
 
 function failure(message, details = {}) {
     return Object.assign(new Error(message), details);
@@ -28,7 +26,6 @@ function safeFailure(error, apiKey) {
         logical: error?.logical === true,
         nativeUnavailable: error?.nativeUnavailable === true,
         nativeUnknown: error?.nativeUnknown === true,
-        credentialBlocked: error?.credentialBlocked === true,
     });
 }
 
@@ -112,13 +109,8 @@ function modelsUrl(baseUrl) {
     return url.href;
 }
 
-/** Conventional chat base for a saved/manual model; this is not verification. */
-export function defaultApiEndpoint(account) {
-    return endpointCandidates(account, String(account?.apiKey || '').trim())[0];
-}
-
-function payloadModels(payload, apiKey, depth = 0) {
-    if (!payload || typeof payload !== 'object' || depth > 2) {
+function payloadModels(payload, apiKey) {
+    if (!payload || typeof payload !== 'object') {
         throw failure('接口未返回有效的模型列表。', { protocol: true });
     }
     const code = payload.code;
@@ -138,10 +130,9 @@ function payloadModels(payload, apiKey, depth = 0) {
     if (Array.isArray(payload)) list = payload;
     else if (Array.isArray(payload.data)) list = payload.data;
     else if (Array.isArray(payload.models)) { list = payload.models; namedModels = true; }
-    else if (payload.data && typeof payload.data === 'object') return payloadModels(payload.data, apiKey, depth + 1);
     if (!list?.length) throw failure('接口未返回可用模型，请检查地址和密钥的模型权限。', { protocol: true });
     const models = list.map(item => {
-        const value = typeof item === 'string' ? item
+        const value = typeof item === 'string' && namedModels ? item
             : item && typeof item === 'object' && !Array.isArray(item)
                 ? item.id ?? (namedModels ? item.model ?? item.name : undefined) : undefined;
         if (typeof value !== 'string' || !value.trim() || /[\u0000-\u001f<>]/.test(value)) {
@@ -152,29 +143,11 @@ function payloadModels(payload, apiKey, depth = 0) {
     return [...new Set(models)].sort((a, b) => a.localeCompare(b));
 }
 
-function catalogModels(payload, apiKey) {
-    // New API / One API publish pricing records, not key-specific permissions.
-    // Validate the wrapper before extracting only explicit model identifiers.
-    if (!Array.isArray(payload?.data)) throw failure('站点未提供公开模型目录。', { protocol: true });
-    const list = payload.data.filter(item => item && typeof item.model_name === 'string'
-        && (!Array.isArray(item.supported_endpoint_types) || !item.supported_endpoint_types.length
-            || item.supported_endpoint_types.includes('openai')));
-    return payloadModels({ ...payload, data: list.map(item => ({ id: item.model_name })) }, apiKey);
-}
-
-async function publicCatalog(account, catalogRequest) {
-    const base = parseBase(account.baseUrl, account.apiKey);
-    const path = base.pathname.replace(/\/v\d+(?:[._a-z-][\w.-]*)?$/i, '').replace(/\/+$/, '');
-    base.pathname = path + (/\/api$/.test(path) ? '/pricing' : '/api/pricing');
-    const payload = await catalogRequest(base.href);
-    return { baseUrl: defaultApiEndpoint(account), models: catalogModels(payload, account.apiKey), source: 'catalog' };
-}
-
 /**
  * Probe a finite, same-origin set of API bases. request receives a model URL;
  * nativeRequest, when supplied, receives the corresponding API base instead.
  */
-export async function resolveApiEndpoint(account, { request = requestApiJson, nativeRequest, catalogRequest } = {}) {
+export async function resolveApiEndpoint(account, { request = requestApiJson, nativeRequest } = {}) {
     const apiKey = String(account?.apiKey || '').trim();
     if (!apiKey) throw failure('请先填写有效的 API Key。');
     const candidates = endpointCandidates(account, apiKey);
@@ -184,7 +157,7 @@ export async function resolveApiEndpoint(account, { request = requestApiJson, na
         try {
             // The generic /proxy route can mix upstream and SillyTavern HTTP
             // authentication. Model queries use only the explicit native fallback.
-            const payload = await request(modelsUrl(baseUrl), apiKey, { proxy: false, credentialType: 'apiKey' });
+            const payload = await request(modelsUrl(baseUrl), apiKey, { proxy: false });
             return { baseUrl, models: payloadModels(payload, apiKey) };
         } catch (error) {
             directError = safeFailure(error, apiKey);
@@ -192,24 +165,21 @@ export async function resolveApiEndpoint(account, { request = requestApiJson, na
         }
 
         // An explicit upstream authorization failure is not a version hint.
-        if (AUTH_STATUSES.has(directError.status) || directError.credentialBlocked) throw directError;
-        if (typeof nativeRequest === 'function' && (directError.network || GATEWAY_STATUSES.has(directError.status))) {
+        if (AUTH_STATUSES.has(directError.status)) throw directError;
+        if (typeof nativeRequest === 'function' && directError.network) {
             try {
                 const payload = await nativeRequest(baseUrl, apiKey);
                 return { baseUrl, models: payloadModels(payload, apiKey) };
             } catch (error) {
                 const nativeError = safeFailure(error, apiKey);
                 errors.push(nativeError);
-                if (AUTH_STATUSES.has(nativeError.status) || nativeError.credentialBlocked) throw nativeError;
+                if (AUTH_STATUSES.has(nativeError.status)) throw nativeError;
                 if (nativeError.nativeUnavailable || (nativeError.logical && !nativeError.nativeUnknown)
-                    || (nativeError.status && !ROUTE_STATUSES.has(nativeError.status) && !GATEWAY_STATUSES.has(nativeError.status))) throw nativeError;
+                    || (nativeError.status && !ROUTE_STATUSES.has(nativeError.status))) throw nativeError;
             }
         }
-        if ((directError.logical && !ROUTE_STATUSES.has(directError.status))
-            || (directError.status && !ROUTE_STATUSES.has(directError.status) && !GATEWAY_STATUSES.has(directError.status))) throw directError;
-    }
-    if (typeof catalogRequest === 'function') {
-        try { return await publicCatalog(account, catalogRequest); } catch { /* Keep the original model-query error. */ }
+        if (AUTH_STATUSES.has(directError.status) || directError.logical
+            || (directError.status && !ROUTE_STATUSES.has(directError.status))) throw directError;
     }
     throw errors.find(error => error.nativeUnknown) || errors.find(error => error.network) || errors.at(-1)
         || failure('未找到可用的 API 模型接口。', { protocol: true });
@@ -227,7 +197,6 @@ export async function requestModelsViaSillyTavern(baseUrl, apiKey, options = {})
     const key = String(apiKey || '').trim();
     if (!key) throw failure('请先填写有效的 API Key。');
     const base = parseBase(baseUrl, key);
-    assertCredentialRequest(base.href, key, { ...options, credentialType: 'apiKey' });
     if (typeof options.getRequestHeaders !== 'function') {
         throw failure('当前环境无法提供酒馆请求认证，未启用原生模型查询。', { nativeUnavailable: true });
     }
@@ -236,34 +205,25 @@ export async function requestModelsViaSillyTavern(baseUrl, apiKey, options = {})
     headers.set('Content-Type', 'application/json');
     headers.set('Accept', 'application/json');
     const timeoutMs = Math.max(100, Math.min(60000, Number(options.timeoutMs) || 10000));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
     let text;
-    for (let attempt = 0; attempt < 2; attempt++) {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-            response = await fetchImpl('/api/backends/chat-completions/status', {
-                method: 'POST', headers, credentials: 'same-origin', cache: 'no-store',
-                redirect: 'error', signal: controller.signal,
-                body: JSON.stringify({
-                    chat_completion_source: 'custom',
-                    // url-join on older taverns appends /models after a query.
-                    // An explicit target plus fragment preserves query values.
-                    custom_url: base.search ? `${modelsUrl(baseString(base))}#sam-model-request` : baseString(base),
-                    custom_include_headers: JSON.stringify({ Authorization: `Bearer ${key}`, Accept: 'application/json' }),
-                }),
-            });
-            text = await response.text();
-        } catch {
-            throw failure(controller.signal.aborted ? '酒馆模型查询超时，请稍后重试。' : '无法通过酒馆查询模型，请检查酒馆连接。', { network: true });
-        } finally {
-            clearTimeout(timer);
-        }
-        if (attempt === 0 && GATEWAY_STATUSES.has(response.status)) {
-            await new Promise(resolve => setTimeout(resolve, 400));
-            continue;
-        }
-        break;
+    try {
+        response = await fetchImpl('/api/backends/chat-completions/status', {
+            method: 'POST', headers, credentials: 'same-origin', cache: 'no-store',
+            redirect: 'error', signal: controller.signal,
+            body: JSON.stringify({
+                chat_completion_source: 'custom',
+                custom_url: baseString(base),
+                custom_include_headers: JSON.stringify({ Authorization: `Bearer ${key}` }),
+            }),
+        });
+        text = await response.text();
+    } catch {
+        throw failure(controller.signal.aborted ? '酒馆模型查询超时，请稍后重试。' : '无法通过酒馆查询模型，请检查酒馆连接。', { network: true });
+    } finally {
+        clearTimeout(timer);
     }
     if (!response.ok) {
         const status = response.status;
@@ -299,10 +259,8 @@ export async function requestModelsViaSillyTavern(baseUrl, apiKey, options = {})
  * own HTTP Authorization header on the browser-to-server request.
  */
 export async function requestApiJsonViaSillyTavern(url, apiKey = '', options = {}) {
-    const label = options.queryKind === 'models' ? '模型目录' : '余额';
     const key = String(apiKey || '').trim();
     const target = parseBase(url, key);
-    assertCredentialRequest(target.href, key, options);
     // Always override the saved chat key, including for public status requests.
     const upstreamHeaders = { Authorization: key ? `Bearer ${key}` : '' };
     const accountUserId = String(options.accountUserId || '').trim();
@@ -313,7 +271,7 @@ export async function requestApiJsonViaSillyTavern(url, apiKey = '', options = {
         upstreamHeaders['New-Api-User'] = accountUserId;
     }
     if (typeof options.getRequestHeaders !== 'function') {
-        throw failure(`当前环境无法提供酒馆请求认证，不能通过酒馆查询${label}。`, { nativeUnavailable: true });
+        throw failure('当前环境无法提供酒馆请求认证，不能通过酒馆查询余额。', { nativeUnavailable: true });
     }
     const fetchImpl = options.fetch || options.fetchImpl || globalThis.fetch;
     const headers = new Headers(await options.getRequestHeaders());
@@ -338,7 +296,7 @@ export async function requestApiJsonViaSillyTavern(url, apiKey = '', options = {
             });
             text = await response.text();
         } catch {
-            throw failure(controller.signal.aborted ? `酒馆${label}查询超时，请稍后重试。` : `无法通过酒馆查询${label}，请检查酒馆连接。`, { network: true });
+            throw failure(controller.signal.aborted ? '酒馆余额查询超时，请稍后重试。' : '无法通过酒馆查询余额，请检查酒馆连接。', { network: true });
         } finally {
             clearTimeout(timer);
         }
@@ -355,14 +313,14 @@ export async function requestApiJsonViaSillyTavern(url, apiKey = '', options = {
         const message = AUTH_STATUSES.has(status)
             ? `酒馆未通过访问认证（HTTP ${status}），请刷新酒馆页面并重新登录。`
             : [502, 503, 504].includes(status)
-                ? `${label}查询的转发服务暂时不可用（HTTP ${status}，已重试）。若持续失败，请检查酒馆服务器的网络连接。`
-                : `酒馆${label}查询失败（HTTP ${status}）。`;
+                ? `余额查询的转发服务暂时不可用（HTTP ${status}，已重试）。若持续失败，请检查酒馆服务器的网络连接。`
+                : `酒馆余额查询失败（HTTP ${status}）。`;
         throw failure(message, { status, nativeUnavailable: [404, 405].includes(status) });
     }
     try {
         return JSON.parse(text);
     } catch {
-        throw failure(`酒馆返回了网页或无效数据，未取得${label}信息。`, { protocol: true });
+        throw failure('酒馆返回了网页或无效数据，未取得余额信息。', { protocol: true });
     }
 }
 

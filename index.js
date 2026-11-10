@@ -8,12 +8,9 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.24&rev=balance-options-20261110';
-import { defaultApiEndpoint, displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.24&rev=balance-options-20261110';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.24&rev=balance-options-20261110';
-import { createDeviceTokenStore, settingsForServer } from './token-storage.js?v=1.8.24&rev=balance-options-20261110';
-import { assertCredentialPage, assertCredentialRequest } from './credential-security.js?v=1.8.24&rev=balance-options-20261110';
-import { createTokenVault } from './token-vault.js?v=1.8.24&rev=balance-options-20261110';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.24&rev=before-protection-20261110';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.24&rev=before-protection-20261110';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.24&rev=before-protection-20261110';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
 const EXTENSION_VERSION = '1.8.24';
@@ -35,11 +32,6 @@ const DEFAULT_SETTINGS = Object.freeze({
 });
 
 let settings;
-let deviceTokenStore = null;
-let tokenVault = null;
-let vaultUnlockPromise = null;
-let vaultLockTimer = null;
-let deviceTokenStorageError = '';
 let refreshTimer = null;
 let failoverRevision = 0;
 let generationActive = false;
@@ -50,11 +42,8 @@ let isFailingOver = false;
 let formModels = [];
 let formResolvedConnection = null;
 let formConnectionRevision = 0;
-let accountEditPosition = null;
-let viewScrollRevision = 0;
 let isLoadingModels = false;
 let isLoadingBalance = false;
-let balanceRelayPromptQueue = Promise.resolve();
 let isApplyingAccount = false;
 let applyingAccountId = '';
 let scrollTopObserver = null;
@@ -123,38 +112,14 @@ function savedApiEndpoint(account) {
     return isHttpUrl(resolved) && displayApiUrl(resolved) === displayApiUrl(account?.baseUrl) ? resolved : '';
 }
 
-function connectionApiEndpoint(account) {
-    const saved = savedApiEndpoint(account);
-    if (saved || !asString(account?.selectedModel).trim()) return saved;
-    try { return defaultApiEndpoint(account); } catch { return ''; }
-}
-
 function sameBalanceConnection(left, right) {
     return Boolean(left && right)
         && displayApiUrl(left.baseUrl) === displayApiUrl(right.baseUrl)
         && asString(left.apiKey) === asString(right.apiKey)
-        && hasBalanceToken(left) === hasBalanceToken(right)
         && (left.balanceMode || 'auto') === (right.balanceMode || 'auto')
-        && (left.balanceTokenStorage || 'server') === (right.balanceTokenStorage || 'server')
         && (left.balanceMode !== 'account'
-            || ((left.balanceTokenStorage === 'encrypted'
-                ? JSON.stringify(left.balanceTokenCipher) === JSON.stringify(right.balanceTokenCipher)
-                : asString(left.balanceAccessToken) === asString(right.balanceAccessToken))
+            || (asString(left.balanceAccessToken) === asString(right.balanceAccessToken)
                 && asString(left.balanceUserId) === asString(right.balanceUserId)));
-}
-
-function hasBalanceToken(account) {
-    return Boolean(asString(account?.balanceAccessToken).trim()
-        || (account?.balanceTokenStorage === 'encrypted' && account.balanceTokenCipher));
-}
-
-function updateBalanceControls() {
-    const enabled = settings.accounts.some(hasBalanceToken);
-    const refresh = $('#sam-refresh-all');
-    if (refresh) refresh.hidden = !enabled;
-    const automation = $('#sam-balance-automation');
-    if (automation) automation.hidden = !enabled;
-    updateTokenVaultUi();
 }
 
 function normalizeAccount(account) {
@@ -178,13 +143,9 @@ function normalizeAccount(account) {
         resolvedBaseUrl: savedApiEndpoint({ baseUrl, resolvedBaseUrl: source.resolvedBaseUrl }),
         apiKey: asString(source.apiKey).trim(),
         models: uniqueModels,
-        modelListSource: source.modelListSource === 'catalog' ? 'catalog' : '',
         selectedModel,
         balanceMode: source.balanceMode === 'account' ? 'account' : 'auto',
         balanceAccessToken: asString(source.balanceAccessToken).trim(),
-        balanceTokenStorage: ['device', 'encrypted'].includes(source.balanceTokenStorage) ? source.balanceTokenStorage : 'server',
-        balanceTokenCipher: source.balanceTokenCipher && typeof source.balanceTokenCipher === 'object'
-            ? structuredClone(source.balanceTokenCipher) : null,
         balanceUserId: asString(source.balanceUserId).trim(),
         balanceUrl: asString(source.balanceUrl).trim(),
         balancePath: asString(source.balancePath).trim(),
@@ -212,7 +173,7 @@ function normalizeAccountSort(sort) {
 function sameAppliedConnection(left, right) {
     return Boolean(left && right)
         && displayApiUrl(left.baseUrl) === displayApiUrl(right.baseUrl)
-        && connectionApiEndpoint(left) === connectionApiEndpoint(right)
+        && savedApiEndpoint(left) === savedApiEndpoint(right)
         && asString(left.apiKey) === asString(right.apiKey)
         && asString(left.selectedModel) === asString(right.selectedModel);
 }
@@ -258,7 +219,6 @@ function normalizeSettings(raw) {
         ...retained,
         version: SETTINGS_VERSION,
         accounts,
-        deviceTokenScope: asString(source.deviceTokenScope) || makeId(),
         selectedAccountId,
         accountFilter: normalizeAccountFilter(source.accountFilter, accounts),
         accountSort: normalizeAccountSort(source.accountSort),
@@ -301,48 +261,20 @@ function updateBalanceSettingsUi() {
         : '根据 API 地址识别账户余额接口，使用已保存的 API Key 查询。';
     const fields = $('#sam-balance-account-fields');
     if (fields) fields.hidden = !accountMode;
-    for (const selector of ['#sam-balance-access-token', '#sam-balance-user-id', '#sam-clear-balance-token',
-        '#sam-balance-token-storage']) {
+    for (const selector of ['#sam-balance-access-token', '#sam-balance-user-id', '#sam-clear-balance-token']) {
         const input = $(selector);
         if (input) input.disabled = !accountMode;
     }
     const existing = settings?.accounts.find(account => account.id === $('#sam-account-id')?.value);
     const clearRow = $('#sam-balance-clear-row');
-    if (clearRow) clearRow.hidden = !hasBalanceToken(existing);
+    if (clearRow) clearRow.hidden = !existing?.balanceAccessToken;
     const token = $('#sam-balance-access-token');
-    if (token) token.placeholder = hasBalanceToken(existing) ? '留空以保留账户访问令牌' : '在网站个人设置中获取';
-    const encryptionAvailable = tokenEncryptionAvailable();
-    const encryptedOption = $('#sam-balance-token-storage option[value="encrypted"]');
-    if (encryptedOption) encryptedOption.disabled = !encryptionAvailable;
-    const encryptionHelp = $('#sam-token-encryption-help');
-    if (encryptionHelp) encryptionHelp.hidden = encryptionAvailable;
+    if (token) token.placeholder = existing?.balanceAccessToken ? '留空以保留账户访问令牌' : '在网站个人设置中获取';
 }
 
 function persist() {
-    try { saveEncryptedRecovery(settings.accounts); }
-    catch { notify('本机密文恢复副本暂时无法更新，请检查浏览器存储空间。', 'error'); }
-    if (deviceTokenStore) {
-        try {
-            deviceTokenStore.synchronize(settings.accounts);
-            deviceTokenStorageError = '';
-        } catch (error) {
-            deviceTokenStorageError = error.message;
-            notify(deviceTokenStorageError, 'error');
-        }
-    }
-    extension_settings[EXTENSION_NAME] = settingsForServer(settings);
+    extension_settings[EXTENSION_NAME] = settings;
     if (typeof saveSettingsDebounced === 'function') saveSettingsDebounced();
-}
-
-function prepareCredentialSave(accounts) {
-    if (accounts.some(account => account.balanceTokenStorage === 'encrypted' && account.balanceAccessToken)) {
-        throw new Error('系统令牌尚未完成加密，已停止保存。');
-    }
-    saveEncryptedRecovery(accounts);
-    if (deviceTokenStore) deviceTokenStore.synchronize(accounts);
-    else if (accounts.some(account => account.balanceTokenStorage === 'device' && account.balanceAccessToken)) {
-        throw new Error('当前浏览器尚未准备好令牌存储，请刷新页面后重试。');
-    }
 }
 
 function exportableAccount(account) {
@@ -424,7 +356,6 @@ function importedAccount(source, keyEntry, fallbackName = '未命名账户') {
         selectedModel,
         balanceMode: raw.balanceMode,
         balanceAccessToken: raw.balanceAccessToken,
-        balanceTokenStorage: settings?.tokenVault ? 'encrypted' : 'device',
         balanceUserId: raw.balanceUserId,
         balanceUrl: raw.balanceUrl,
         balancePath: raw.balancePath,
@@ -491,7 +422,6 @@ async function importAccountsFromFile(file) {
             .filter(item => item.previous);
         const overwriteConflicts = conflicts.length === 0 || typeof globalThis.confirm !== 'function'
             || globalThis.confirm(`发现 ${conflicts.length} 个重复 API，是否全部覆盖？\n\n确定：全部覆盖\n取消：全部跳过`);
-        const nextAccounts = [...settings.accounts];
         let added = 0;
         let overwritten = 0;
         let skipped = 0;
@@ -509,17 +439,14 @@ async function importAccountsFromFile(file) {
                     pollingDisabled: previous.pollingDisabled,
                     createdAt: previous.createdAt,
                 };
-                nextAccounts[nextAccounts.indexOf(previous)] = { ...account, ...preserved, updatedAt: Date.now() };
+                Object.assign(previous, account, preserved, { updatedAt: Date.now() });
                 overwritten++;
             } else {
-                nextAccounts.push(account);
+                settings.accounts.push(account);
                 existing.set(identity, account);
                 added++;
             }
         }
-        for (let i = 0; i < nextAccounts.length; i++) nextAccounts[i] = await prepareEncryptedAccount(nextAccounts[i]);
-        prepareCredentialSave(nextAccounts);
-        settings.accounts = nextAccounts;
         settings.accountFilter = { type: 'all' };
         persist();
         clearForm();
@@ -548,7 +475,8 @@ function notify(message, kind = 'info', options = {}) {
 function readForm() {
     const accountId = asString($('#sam-account-id')?.value).trim();
     const existing = settings.accounts.find(account => account.id === accountId);
-    const apiKey = asString($('#sam-api-key')?.value).trim();
+    const enteredKey = asString($('#sam-api-key')?.value).trim();
+    const apiKey = enteredKey || existing?.apiKey || '';
     const enteredUrl = normalizeUrl($('#sam-base-url')?.value);
     const baseUrl = displayApiUrl(enteredUrl);
     // Keep saved balance support when only the account name or group changes.
@@ -558,16 +486,11 @@ function readForm() {
     const enteredBalanceToken = asString($('#sam-balance-access-token')?.value).trim();
     const balanceAccessToken = $('#sam-clear-balance-token')?.checked ? ''
         : enteredBalanceToken || (sameService ? existing.balanceAccessToken : '') || '';
-    const storageValue = $('#sam-balance-token-storage')?.value ?? existing?.balanceTokenStorage ?? 'server';
-    const balanceTokenStorage = ['device', 'encrypted'].includes(storageValue) ? storageValue : 'server';
-    const balanceTokenCipher = sameService && !$('#sam-clear-balance-token')?.checked ? existing.balanceTokenCipher || null : null;
     const balanceUserId = asString($('#sam-balance-user-id')?.value
         ?? (sameService ? existing.balanceUserId : '')).trim();
     const resolvedBaseUrl = formResolvedConnection?.baseUrl === baseUrl && formResolvedConnection.apiKey === apiKey
         ? formResolvedConnection.resolvedBaseUrl : sameConnection ? savedApiEndpoint(existing) : '';
-    const selectedModel = asString($('#sam-model-manual')?.value).trim() || asString($('#sam-model-select')?.value).trim();
-    const modelListSource = formResolvedConnection?.baseUrl === baseUrl && formResolvedConnection.apiKey === apiKey
-        ? formResolvedConnection.modelListSource || '' : sameConnection ? existing.modelListSource || '' : '';
+    const selectedModel = asString($('#sam-model-select')?.value).trim();
     const models = [...new Set([
         ...formModels,
         ...(sameConnection ? existing.models : []),
@@ -584,18 +507,15 @@ function readForm() {
         resolvedBaseUrl,
         apiKey,
         models,
-        modelListSource,
         selectedModel,
         balanceMode,
         balanceAccessToken,
-        balanceTokenStorage,
-        balanceTokenCipher,
         balanceUserId,
         balanceUrl: sameService ? existing.balanceUrl : '',
         balancePath: sameService ? existing.balancePath : '',
         balanceCurrency: sameService ? existing.balanceCurrency : '',
         balanceParser: sameService ? existing.balanceParser : 'generic',
-        balance: sameBalanceConnection(existing, { baseUrl, apiKey, balanceMode, balanceAccessToken, balanceUserId, balanceTokenStorage, balanceTokenCipher })
+        balance: sameBalanceConnection(existing, { baseUrl, apiKey, balanceMode, balanceAccessToken, balanceUserId })
             ? existing.balance : normalizeBalance(null),
         createdAt: existing?.createdAt || Date.now(),
         updatedAt: Date.now(),
@@ -639,21 +559,7 @@ function restorePageScroll(state) {
     }
 }
 
-function restoreAccountEditPosition(position) {
-    const list = $('#sam-account-list');
-    if (!list) return;
-    restorePageScroll(position.pageScroll);
-    list.scrollTop = position.listTop;
-    const card = $$('.sam-account-item', list).find(item => item.dataset.accountId === position.accountId);
-    if (!card) return;
-    // Follow the account after sorting/filtering, not its former list index.
-    const scroll = capturePageScroll(card);
-    const delta = card.getBoundingClientRect().top - position.cardTop;
-    restorePageScroll({ ...scroll, top: scroll.top + delta });
-}
-
-function setActiveView(view, { focus = false, restoreScroll } = {}) {
-    const revision = ++viewScrollRevision;
+function setActiveView(view, { focus = false } = {}) {
     const activeView = view === 'editor' ? 'editor' : 'accounts';
     const root = rootElement();
     const previousView = $('#sam-tab-editor')?.getAttribute('aria-selected') === 'true' ? 'editor' : 'accounts';
@@ -673,11 +579,9 @@ function setActiveView(view, { focus = false, restoreScroll } = {}) {
     }
     updateScrollTopButton();
     if (focus) (activeView === 'editor' ? $('#sam-name') : $('#sam-tab-accounts'))?.focus({ preventScroll: true });
-    if (scrollState || restoreScroll) {
+    if (scrollState) {
         const restore = () => {
-            if (revision !== viewScrollRevision) return;
-            if (restoreScroll) restoreScroll();
-            else restorePageScroll(scrollState);
+            restorePageScroll(scrollState);
             updateScrollTopButton();
         };
         restore();
@@ -686,15 +590,10 @@ function setActiveView(view, { focus = false, restoreScroll } = {}) {
 }
 
 function clearForm() {
-    const returnPosition = accountEditPosition?.accountId === $('#sam-account-id')?.value
-        && settings.accounts.some(account => account.id === accountEditPosition.accountId) ? accountEditPosition : null;
-    accountEditPosition = null;
     formConnectionRevision++;
     formResolvedConnection = null;
     const form = $('#sam-account-form');
     if (form) form.reset();
-    if ($('#sam-balance-settings')) $('#sam-balance-settings').open = false;
-    if ($('#sam-token-advanced')) $('#sam-token-advanced').open = false;
     const accountId = $('#sam-account-id');
     if (accountId) accountId.value = '';
     const modelSelect = $('#sam-model-select');
@@ -706,7 +605,6 @@ function clearForm() {
         modelSelect.append(option);
     }
     formModels = [];
-    updateModelSourceHint('');
     renderGroupSuggestions('');
     if ($('#sam-delete-account')) $('#sam-delete-account').hidden = true;
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = true;
@@ -720,12 +618,8 @@ function clearForm() {
     setKeyVisibility(false);
     updateBalanceSettingsUi();
     updateFormBalance();
-    setActiveView('accounts', {
-        restoreScroll: returnPosition ? () => restoreAccountEditPosition(returnPosition) : undefined,
-    });
-    const returnCard = returnPosition && $$('.sam-account-item').find(item => item.dataset.accountId === returnPosition.accountId);
-    const focusTarget = returnCard ? $('button[data-action="edit"]', returnCard) : $('#sam-tab-accounts');
-    focusTarget?.focus({ preventScroll: true });
+    setActiveView('accounts');
+    $('#sam-tab-accounts')?.focus({ preventScroll: true });
 }
 
 function fillForm(account) {
@@ -736,11 +630,9 @@ function fillForm(account) {
         '#sam-account-id': account.id,
         '#sam-name': account.name,
         '#sam-base-url': displayApiUrl(account.baseUrl),
-        '#sam-api-key': account.apiKey || '',
-        '#sam-model-manual': '',
+        '#sam-api-key': '',
         '#sam-balance-mode': account.balanceMode || 'auto',
         '#sam-balance-access-token': '',
-        '#sam-balance-token-storage': account.balanceTokenStorage || 'server',
         '#sam-balance-user-id': account.balanceUserId || '',
     };
     for (const [selector, value] of Object.entries(values)) {
@@ -750,20 +642,17 @@ function fillForm(account) {
     renderGroupSuggestions(account.group);
     formModels = [...account.models];
     populateModelSelect(formModels, account.selectedModel);
-    updateModelSourceHint(account.modelListSource);
     if ($('#sam-cancel-edit')) $('#sam-cancel-edit').hidden = false;
     if ($('#sam-delete-account')) $('#sam-delete-account').hidden = false;
     setButtonContent($('#sam-save-account'), 'fa-solid fa-floppy-disk', '保存修改');
     if ($('#sam-form-title')) $('#sam-form-title').textContent = '编辑 API';
     if ($('#sam-editor-tab-label')) $('#sam-editor-tab-label').textContent = '编辑 API';
     if ($('#sam-api-key')) {
-        $('#sam-api-key').required = true;
-        $('#sam-api-key').placeholder = 'sk-…';
+        $('#sam-api-key').required = false;
+        $('#sam-api-key').placeholder = account.apiKey ? '留空以保留当前 Key' : 'sk-…';
     }
     setKeyVisibility(false);
     if ($('#sam-clear-balance-token')) $('#sam-clear-balance-token').checked = false;
-    if ($('#sam-balance-settings')) $('#sam-balance-settings').open = hasBalanceToken(account);
-    if ($('#sam-token-advanced')) $('#sam-token-advanced').open = false;
     updateBalanceSettingsUi();
     updateFormBalance();
     setActiveView('editor');
@@ -796,317 +685,23 @@ function resolveAccountEndpoint(account) {
     return resolveApiEndpoint(account, {
         request: requestJson,
         nativeRequest: (baseUrl, apiKey) => requestNativeModels(baseUrl, apiKey, { getRequestHeaders }),
-        catalogRequest: async url => {
-            try { return await requestJson(url, '', { proxy: false }); } catch (error) {
-                if (!error?.network && ![502, 503, 504].includes(error?.status)) throw error;
-                return requestApiJsonViaSillyTavern(url, '', { getRequestHeaders, queryKind: 'models' });
-            }
-        },
     });
-}
-
-function updateModelSourceHint(source) {
-    const hint = $('#sam-model-source');
-    if (hint) {
-        hint.textContent = source === 'catalog' ? '公开模型目录：实际可用模型以当前 Key 的分组和权限为准。' : '';
-        hint.hidden = source !== 'catalog';
-    }
-}
-
-function modelFetchFailure(error) {
-    return `${error?.message || '获取模型失败。'} 已有模型仍可使用；也可在编辑中手动填写模型 ID 后保存。`;
-}
-
-function tokenEncryptionAvailable() {
-    try {
-        assertCredentialPage();
-        return Boolean(globalThis.crypto?.subtle);
-    } catch { return false; }
-}
-
-function updateTokenVaultUi() {
-    const button = $('#sam-token-vault');
-    if (button) button.hidden = !settings?.tokenVault && !settings?.accounts.some(hasBalanceToken);
-    if (button) setButtonContent(button, 'fa-solid fa-lock', !settings?.tokenVault ? '加密令牌'
-        : tokenVault?.unlocked ? '锁定令牌' : '解锁令牌');
-    if (button) button.disabled = !tokenVault?.unlocked && !tokenEncryptionAvailable();
-    const migrate = $('#sam-encrypt-remaining');
-    if (migrate) migrate.hidden = !settings?.tokenVault
-        || !settings.accounts.some(account => account.balanceTokenStorage !== 'encrypted' && account.balanceAccessToken);
-    if (migrate) migrate.disabled = !tokenEncryptionAvailable();
-    const restore = $('#sam-restore-encrypted');
-    if (restore) {
-        const recovery = readEncryptedRecovery();
-        const sameVault = !settings.tokenVault || settings.tokenVault.id === recovery?.tokenVault?.id;
-        restore.hidden = !sameVault || !recovery?.accounts?.some(saved => settings.accounts.some(account => account.id === saved.id
-            && account.baseUrl === saved.baseUrl && (account.balanceTokenStorage !== 'encrypted' || !account.balanceTokenCipher)));
-    }
-}
-
-function readEncryptedRecovery() {
-    try { return JSON.parse(localStorage.getItem(`sam-encrypted-recovery:${settings.deviceTokenScope}`) || 'null'); }
-    catch { return null; }
-}
-
-function saveEncryptedRecovery(accounts) {
-    if (!settings.tokenVault) return;
-    const data = { version: 1, tokenVault: settings.tokenVault, accounts: accounts
-        .filter(account => account.balanceTokenStorage === 'encrypted' && account.balanceTokenCipher)
-        .map(account => ({ id: account.id, baseUrl: account.baseUrl, balanceTokenCipher: account.balanceTokenCipher })) };
-    const value = JSON.stringify(data);
-    const key = `sam-encrypted-recovery:${settings.deviceTokenScope}`;
-    try {
-        if (localStorage.getItem(key) !== value) localStorage.setItem(key, value);
-    } catch { throw new Error('无法保存本机密文恢复副本，迁移未完成，原令牌不会主动清除。'); }
-}
-
-function restoreEncryptedRecovery() {
-    const recovery = readEncryptedRecovery();
-    if (!recovery?.tokenVault || !Array.isArray(recovery.accounts)) return;
-    if (settings.tokenVault && settings.tokenVault.id !== recovery.tokenVault.id) return;
-    const matches = recovery.accounts.filter(saved => settings.accounts.some(account => account.id === saved.id && account.baseUrl === saved.baseUrl
-        && (account.balanceTokenStorage !== 'encrypted' || !account.balanceTokenCipher)));
-    if (!matches.length || !globalThis.confirm?.(`恢复本机保存的 ${matches.length} 个加密令牌？这用于酒馆同步失败后的恢复，不会修改聊天 API Key。`)) return;
-    const nextAccounts = settings.accounts.map(account => {
-        const saved = matches.find(item => item.id === account.id);
-        return saved ? { ...account, balanceTokenStorage: 'encrypted', balanceAccessToken: '', balanceTokenCipher: saved.balanceTokenCipher } : account;
-    });
-    try {
-        settings.tokenVault = recovery.tokenVault;
-        prepareCredentialSave(nextAccounts);
-        settings.accounts = nextAccounts;
-        tokenVault = createTokenVault(recovery.tokenVault);
-        persist();
-        renderAccounts();
-        notify('已恢复加密令牌，请使用原密码解锁。', 'success');
-    } catch (error) { notify(error.message, 'error'); }
-}
-
-function touchTokenVault() {
-    if (vaultLockTimer) clearTimeout(vaultLockTimer);
-    vaultLockTimer = tokenVault?.unlocked ? setTimeout(lockTokenVault, 15 * 60 * 1000) : null;
-}
-
-function lockTokenVault() {
-    tokenVault?.lock();
-    if (vaultLockTimer) clearTimeout(vaultLockTimer);
-    vaultLockTimer = null;
-    for (const [id, query] of activeBalanceQueries) {
-        if (query.snapshot.balanceTokenStorage !== 'encrypted') continue;
-        query.snapshot.balanceAccessToken = '';
-        activeBalanceQueries.delete(id);
-        const account = settings.accounts.find(item => item.id === id);
-        if (account?.balance.status === 'loading') account.balance.status = 'unknown';
-    }
-    renderAccounts();
-}
-
-function showTokenPasswordDialog(candidate, creating, migrateAll) {
-    return new Promise(resolve => {
-        const dialog = document.createElement('dialog');
-        dialog.id = 'sam-token-vault-dialog';
-        dialog.innerHTML = `<form autocomplete="off">
-            <h3>${creating ? '设置系统令牌加密密码' : '解锁系统令牌'}</h3>
-            <p>${creating ? '密码至少 12 个字符，不保存到酒馆。其他设备使用同一密码解锁。' : '请输入你的独立解锁密码。'}</p>
-            ${migrateAll ? '<p>这次会加密当前能读取的系统令牌，无需重新填写；旧备份不会自动清除。</p>' : ''}
-            <label>解锁密码<input id="sam-vault-password" type="password" autocomplete="new-password" required /></label>
-            ${creating ? '<label>再次输入<input id="sam-vault-confirm" type="password" autocomplete="new-password" required /></label>' : ''}
-            <p class="sam-vault-note">加密保护保存文件。经酒馆查询时，服务器仍会接触查询令牌。刷新页面或闲置 15 分钟后自动锁定。</p>
-            <output id="sam-vault-error" role="alert"></output>
-            <div class="sam-vault-actions"><button type="button" id="sam-vault-cancel">取消</button><button type="submit" id="sam-vault-submit">${creating ? '设置密码' : '解锁'}</button></div>
-            ${creating ? '' : '<button type="button" id="sam-vault-reset">忘记密码：清除加密令牌后重设</button>'}
-        </form>`;
-        rootElement().append(dialog);
-        let settled = false;
-        const finish = ok => {
-            if (settled) return;
-            settled = true;
-            if (!ok) candidate.lock();
-            for (const input of dialog.querySelectorAll('input')) input.value = '';
-            if (dialog.open) dialog.close();
-            dialog.remove();
-            resolve(ok);
-        };
-        dialog.addEventListener('cancel', event => { event.preventDefault(); finish(false); });
-        dialog.addEventListener('close', () => finish(false));
-        dialog.querySelector('#sam-vault-cancel').addEventListener('click', () => finish(false));
-        dialog.querySelector('#sam-vault-reset')?.addEventListener('click', () => {
-            if (!globalThis.confirm?.('这会清除所有“加密同步保存”的系统令牌，需要重新填写。站点资料、聊天 API Key 和其他保存方式的令牌不会删除。确定重设吗？')) return;
-            finish(false);
-            lockTokenVault();
-            settings.accounts = settings.accounts.map(account => account.balanceTokenStorage === 'encrypted'
-                ? { ...account, balanceAccessToken: '', balanceTokenCipher: null, balance: normalizeBalance(null) } : account);
-            settings.tokenVault = null;
-            localStorage.removeItem(`sam-encrypted-recovery:${settings.deviceTokenScope}`);
-            tokenVault = createTokenVault();
-            persist();
-            renderAccounts();
-        });
-        dialog.querySelector('form').addEventListener('submit', async event => {
-            event.preventDefault();
-            const password = dialog.querySelector('#sam-vault-password');
-            const confirmation = dialog.querySelector('#sam-vault-confirm');
-            const errorOutput = dialog.querySelector('#sam-vault-error');
-            if (creating && (password.value.length < 12 || password.value !== confirmation.value)) {
-                errorOutput.textContent = '密码至少 12 个字符，两次输入必须一致。';
-                return;
-            }
-            const submit = dialog.querySelector('#sam-vault-submit');
-            if (submit.disabled) return;
-            submit.disabled = true;
-            errorOutput.textContent = '';
-            try {
-                if (creating) await candidate.initialize(password.value);
-                else await candidate.unlock(password.value);
-                if (!settled) finish(true);
-            } catch (error) {
-                if (!settled) errorOutput.textContent = error.message;
-            } finally {
-                password.value = '';
-                if (confirmation) confirmation.value = '';
-                submit.disabled = false;
-            }
-        });
-        if (typeof dialog.showModal !== 'function') { finish(false); notify('当前浏览器不支持密码窗口，请更新浏览器。', 'error'); return; }
-        dialog.showModal();
-        dialog.querySelector('#sam-vault-password').focus();
-    });
-}
-
-async function unlockTokenVault({ migrateAll = false } = {}) {
-    if (tokenVault?.unlocked) { touchTokenVault(); return true; }
-    if (vaultUnlockPromise) return vaultUnlockPromise;
-    vaultUnlockPromise = (async () => {
-        assertCredentialPage();
-        const creating = !settings.tokenVault;
-        const candidate = creating ? createTokenVault() : tokenVault || createTokenVault(settings.tokenVault);
-        if (!await showTokenPasswordDialog(candidate, creating, migrateAll)) return false;
-        tokenVault = candidate;
-        if (creating) {
-            settings.tokenVault = candidate.config;
-            persist();
-        }
-        touchTokenVault();
-        updateTokenVaultUi();
-        for (const account of settings.accounts) updateAccountBalanceUi(account);
-        return true;
-    })();
-    try { return await vaultUnlockPromise; }
-    finally { vaultUnlockPromise = null; }
-}
-
-async function prepareEncryptedAccount(account) {
-    const next = { ...account };
-    if (next.balanceTokenStorage === 'encrypted' && next.balanceAccessToken) {
-        if (!await unlockTokenVault()) throw new Error('已取消加密，原有令牌未改变。');
-        next.balanceTokenCipher = await tokenVault.seal(next, next.balanceAccessToken);
-        next.balanceAccessToken = '';
-        next.balance = normalizeBalance(null);
-    } else if (next.balanceTokenStorage !== 'encrypted' && next.balanceTokenCipher) {
-        if (!next.balanceAccessToken) {
-            if (!await unlockTokenVault()) throw new Error('已取消更改保存方式，原密文已保留。');
-            next.balanceAccessToken = await tokenVault.open(next);
-        }
-        next.balanceTokenCipher = null;
-    }
-    return next;
-}
-
-async function encryptExistingSystemTokens() {
-    try {
-        if (!await unlockTokenVault({ migrateAll: true })) return;
-        const originals = settings.accounts.filter(account => account.balanceTokenStorage !== 'encrypted' && account.balanceAccessToken)
-            .map(account => ({ ...account }));
-        const prepared = await Promise.all(originals.map(account => prepareEncryptedAccount({ ...account, balanceTokenStorage: 'encrypted' })));
-        if (originals.some(snapshot => !settings.accounts.some(account => account.id === snapshot.id && sameBalanceConnection(account, snapshot)))) {
-            throw new Error('账户在加密期间发生变化，迁移未保存，请重试。');
-        }
-        const nextAccounts = settings.accounts.map(account => {
-            const encrypted = prepared.find(item => item.id === account.id);
-            return encrypted ? { ...account, balanceTokenStorage: 'encrypted', balanceAccessToken: '', balanceTokenCipher: encrypted.balanceTokenCipher } : account;
-        });
-        prepareCredentialSave(nextAccounts);
-        settings.accounts = nextAccounts;
-        persist();
-        const edited = settings.accounts.find(account => account.id === $('#sam-account-id')?.value);
-        if (edited && prepared.some(account => account.id === edited.id)) fillForm(edited);
-        renderAccounts();
-        notify(`已加密 ${prepared.length} 个系统令牌。旧备份可能仍有明文，聊天 API Key 未加密。`, 'success');
-    } catch (error) { notify(error.message, 'error'); }
-}
-
-function credentialFormSignature() {
-    return JSON.stringify($$('input, select', $('#sam-account-form')).map(input => [input.id, input.value, input.checked]));
-}
-
-async function saveAccountWithEncryption(event) {
-    event?.preventDefault();
-    const draft = readForm();
-    if (!draft.name || !draft.apiKey || !isHttpUrl(draft.baseUrl)) return saveAccountFromForm(event, draft);
-    if (draft.balanceTokenStorage !== 'encrypted' && !draft.balanceTokenCipher) return saveAccountFromForm(event);
-    const signature = credentialFormSignature();
-    const revision = formConnectionRevision;
-    try {
-        const prepared = await prepareEncryptedAccount(draft);
-        if (revision !== formConnectionRevision || signature !== credentialFormSignature()) {
-            throw new Error('表单在加密期间发生变化，未保存，请重试。');
-        }
-        saveAccountFromForm(event, prepared);
-    } catch (error) { notify(error.message, 'error'); }
-}
-
-function isLocalTavern(location = globalThis.location) {
-    try {
-        const url = new URL(location?.href);
-        return ['http:', 'https:'].includes(url.protocol)
-            && (url.hostname === 'localhost' || url.hostname === '[::1]' || /^127(?:\.\d{1,3}){3}$/.test(url.hostname));
-    } catch { return false; }
-}
-
-function canRetryBalanceThroughServer(error) {
-    return !error?.credentialBlocked && ![401, 403, 429].includes(error?.status)
-        && (error?.network === true || [502, 503, 504].includes(error?.status));
-}
-
-function requestBalanceRelayConsent(snapshots, isCurrent = () => true) {
-    // A shared promise limits a manual batch to one decision. Nothing is saved.
-    // Queue separate user actions so their confirmation dialogs cannot overlap.
-    const decision = balanceRelayPromptQueue.catch(() => {}).then(() => {
-        if (!isCurrent() || document.visibilityState === 'hidden' || typeof globalThis.confirm !== 'function') return false;
-        const valid = snapshots.filter(snapshot => settings.accounts.some(account => account.id === snapshot.id
-            && sameBalanceConnection(account, snapshot)));
-        if (!valid.length) return false;
-        const batch = snapshots.length > 1;
-        const scope = batch ? `本次批量刷新的 ${snapshots.length} 个站点中，部分站点无法由浏览器直接查询。`
-            : `“${valid[0].name}”无法由浏览器直接查询余额。`;
-        const target = batch ? '仅为本次批量刷新中直查失败的站点转发'
-            : '仅为这个站点的本次余额查询转发';
-        const message = `${scope}\n\n是否允许酒馆服务器${target}？\n\n`
-            + '转发时，用于查询的网站系统令牌或 API Key 会发送给当前酒馆服务器。使用 VPS／云酒馆时，其管理员或日志可能接触到凭据。\n\n'
-            + '授权不会保存，后台自动刷新不会转发。\n确定：仅本次允许；取消：保持浏览器直查。';
-        return globalThis.confirm(message) === true && isCurrent();
-    });
-    balanceRelayPromptQueue = decision.then(() => {}, () => {});
-    return decision.catch(() => false);
 }
 
 async function requestBalanceJson(url, apiKey, options = {}) {
-    if (options.isCurrent && !options.isCurrent()) throw new Error('账户查询配置已改变，已取消这次请求。');
-    const { useServer, isCurrent, ...requestOptions } = options;
-    if (useServer === true) {
-        return requestApiJsonViaSillyTavern(url, apiKey, { ...requestOptions, getRequestHeaders });
+    try {
+        return await requestJson(url, apiKey, { ...options, proxy: false });
+    } catch (error) {
+        if (!error?.network && ![502, 503, 504].includes(error?.status)) throw error;
+        return requestApiJsonViaSillyTavern(url, apiKey, { ...options, getRequestHeaders });
     }
-    return requestJson(url, apiKey, { ...requestOptions, proxy: false });
 }
 
 function invalidateDraftConnection() {
     formConnectionRevision++;
     formResolvedConnection = null;
     formModels = [];
-    if ($('#sam-model-manual')) $('#sam-model-manual').value = '';
-    updateModelSourceHint('');
     populateModelSelect([]);
-    updateFormBalance();
 }
 
 async function fetchModelsForDraft() {
@@ -1134,17 +729,13 @@ async function fetchModelsForDraft() {
         if (!stillCurrent()) return;
         const { models } = result;
         const baseUrl = displayApiUrl(result.baseUrl);
-        formResolvedConnection = { baseUrl, apiKey: draft.apiKey,
-            resolvedBaseUrl: result.source === 'catalog' ? savedApiEndpoint(draft) : result.baseUrl,
-            modelListSource: result.source === 'catalog' ? 'catalog' : '' };
+        formResolvedConnection = { baseUrl, apiKey: draft.apiKey, resolvedBaseUrl: result.baseUrl };
         if ($('#sam-base-url')) $('#sam-base-url').value = baseUrl;
         formModels = models;
         populateModelSelect(models, $('#sam-model-select')?.value || models[0]);
-        updateModelSourceHint(result.source);
-        notify(result.source === 'catalog' ? `已从公开目录获取 ${models.length} 个模型；可用性以当前 Key 的权限为准。`
-            : `已获取 ${models.length} 个模型。`, result.source === 'catalog' ? 'warning' : 'success');
+        notify(`已获取 ${models.length} 个模型。`, 'success');
     } catch (error) {
-        if (stillCurrent()) notify(modelFetchFailure(error), 'error');
+        if (stillCurrent()) notify(error?.message || '获取模型失败。', 'error');
     } finally {
         isLoadingModels = false;
         if (button) {
@@ -1174,11 +765,6 @@ function updateAccountModelUi(account) {
 }
 
 function updateAccountModelControl(card, account) {
-    const sourceHint = $('.sam-model-source', card);
-    if (sourceHint) {
-        sourceHint.hidden = account.modelListSource !== 'catalog';
-        sourceHint.textContent = '公开目录 · 可用性以 Key 权限为准';
-    }
     const model = $('.sam-account-model', card);
     const select = $('.sam-account-model-select', card);
     const showChoices = modelChoicesVisibleForAccounts.has(account.id);
@@ -1272,8 +858,7 @@ async function fetchModelsForAccount(account) {
             if (!current) return;
             const previous = { ...current };
             current.baseUrl = displayApiUrl(result.baseUrl);
-            current.resolvedBaseUrl = result.source === 'catalog' ? savedApiEndpoint(previous) : result.baseUrl;
-            current.modelListSource = result.source === 'catalog' ? 'catalog' : '';
+            current.resolvedBaseUrl = result.baseUrl;
             current.models = [...new Set([current.selectedModel, ...result.models].filter(Boolean))];
             modelChoicesVisibleForAccounts.add(current.id);
             current.updatedAt = Date.now();
@@ -1287,19 +872,16 @@ async function fetchModelsForAccount(account) {
                 const draft = readForm();
                 if (draft.baseUrl === current.baseUrl && draft.apiKey === current.apiKey) {
                     formModels = [...new Set([draft.selectedModel, ...current.models].filter(Boolean))];
-                    formResolvedConnection = { baseUrl: current.baseUrl, apiKey: current.apiKey,
-                        resolvedBaseUrl: current.resolvedBaseUrl, modelListSource: current.modelListSource };
+                    formResolvedConnection = { baseUrl: current.baseUrl, apiKey: current.apiKey, resolvedBaseUrl: result.baseUrl };
                     populateModelSelect(formModels, draft.selectedModel || current.selectedModel);
-                    updateModelSourceHint(current.modelListSource);
                 }
             }
             updateAccountSelectionUi();
             updatePollingState();
-            notify(result.source === 'catalog' ? `已从公开目录获取“${current.name}”的 ${result.models.length} 个模型；可用性以当前 Key 的权限为准。`
-                : `已获取“${current.name}”的 ${result.models.length} 个模型。`, result.source === 'catalog' ? 'warning' : 'success');
+            notify(`已获取“${current.name}”的 ${result.models.length} 个模型。`, 'success');
         } catch (error) {
             const current = currentAccount();
-            if (current) notify(`${current.name}：${modelFetchFailure(error)}`, 'error');
+            if (current) notify(`${current.name}：${error?.message || '获取模型失败。'}`, 'error');
         } finally {
             if (activeModelQueries.get(snapshot.id) === query) {
                 activeModelQueries.delete(snapshot.id);
@@ -1314,23 +896,12 @@ async function fetchModelsForAccount(account) {
 }
 
 async function refreshBalance(account, options = {}) {
-    if (!hasBalanceToken(account)) return null;
     const snapshot = { ...account };
-    if (snapshot.balanceTokenStorage === 'encrypted' && !tokenVault?.unlocked) {
-        if (options.silent && options.allowPrompt !== true) return null;
-        if (!await unlockTokenVault()) return null;
-        if (!settings.accounts.some(current => current.id === snapshot.id && sameBalanceConnection(current, snapshot))) return null;
-    }
     const active = activeBalanceQueries.get(snapshot.id);
-    const interactive = options.allowPrompt ?? !options.silent;
     if (active && sameBalanceConnection(active.snapshot, snapshot)) {
-        if (interactive) {
-            active.interactive = true;
-            active.requestRelay ||= options.requestRelay;
-        }
         return active.promise;
     }
-    const query = { snapshot, promise: null, interactive, requestRelay: options.requestRelay };
+    const query = { snapshot, promise: null };
     const currentAccount = () => activeBalanceQueries.get(snapshot.id) === query
         ? settings.accounts.find(item => item.id === snapshot.id && sameBalanceConnection(item, snapshot))
         : undefined;
@@ -1338,31 +909,7 @@ async function refreshBalance(account, options = {}) {
     // cannot reuse or be overwritten by an older request for the same account.
     query.promise = Promise.resolve().then(async () => {
         try {
-            if (snapshot.balanceTokenStorage === 'encrypted') snapshot.balanceAccessToken = await tokenVault.open(snapshot);
-            if (snapshot.balanceMode === 'account' && snapshot.balanceTokenStorage === 'device' && !snapshot.balanceAccessToken) {
-                throw new Error(deviceTokenStorageError || '此设备未保存该站点的系统令牌。请编辑账户补填一次；名称、地址和模型已保留。');
-            }
-            const runQuery = useServer => queryBalance(snapshot, { request: (url, credential, requestOptions) => requestBalanceJson(url, credential, {
-                ...requestOptions,
-                useServer,
-                isCurrent: () => Boolean(currentAccount()),
-            }) });
-            let result;
-            const localQuery = isLocalTavern();
-            try {
-                result = await runQuery(localQuery);
-            } catch (error) {
-                if (!currentAccount()) return null;
-                if (localQuery || !canRetryBalanceThroughServer(error)) throw error;
-                if (!query.interactive) {
-                    throw new Error('浏览器直查失败，未通过酒馆转发。需要转发时，请手动点击刷新余额并确认。');
-                }
-                const approved = await (query.requestRelay
-                    ? query.requestRelay() : requestBalanceRelayConsent([snapshot], () => Boolean(currentAccount())));
-                if (!currentAccount()) return null;
-                if (!approved) throw new Error('浏览器直查失败；本次未授权酒馆转发，查询已停止。');
-                result = await runQuery(true);
-            }
+            const result = await queryBalance(snapshot, { request: requestBalanceJson });
             const current = currentAccount();
             if (!current) return null;
             current.balance = normalizeBalance({ ...result, status: 'ok', fetchedAt: Date.now() });
@@ -1379,7 +926,6 @@ async function refreshBalance(account, options = {}) {
             if (!options.silent) notify(`${current.name}：${current.balance.message}`, 'error');
             return current.balance;
         } finally {
-            if (snapshot.balanceTokenStorage === 'encrypted') snapshot.balanceAccessToken = '';
             if (activeBalanceQueries.get(snapshot.id) === query) {
                 activeBalanceQueries.delete(snapshot.id);
                 const current = settings.accounts.find(item => item.id === snapshot.id);
@@ -1395,15 +941,12 @@ async function refreshBalance(account, options = {}) {
 
 async function refreshAllBalances(options = {}) {
     if (isLoadingBalance) return;
-    if (!settings.accounts.some(hasBalanceToken)) {
+    if (!settings.accounts.length) {
         if (!options.silent) notify('还没有可刷新余额的账户。');
         return;
     }
     // Start with the visible accounts, then refresh the rest of the saved list.
-    const queue = [...new Set([...listedAccounts(), ...settings.accounts].filter(hasBalanceToken).map(account => account.id))];
-    const batchSnapshots = queue.map(id => ({ ...settings.accounts.find(account => account.id === id) }));
-    let relayDecision;
-    const requestRelay = () => relayDecision ??= requestBalanceRelayConsent(batchSnapshots);
+    const queue = [...new Set([...listedAccounts(), ...settings.accounts].map(account => account.id))];
     isLoadingBalance = true;
     const button = $('#sam-refresh-all');
     let next = 0;
@@ -1428,12 +971,7 @@ async function refreshAllBalances(options = {}) {
                 // Read the latest credentials if an account was edited while queued.
                 const account = settings.accounts.find(item => item.id === id);
                 if (account) {
-                    // A batch decision covers only credentials captured at its start.
-                    const approvedScope = batchSnapshots.some(snapshot => snapshot.id === account.id && sameBalanceConnection(account, snapshot));
-                    const result = await refreshBalance(account, { silent: true,
-                        allowPrompt: !options.silent && approvedScope,
-                        requestRelay: approvedScope ? requestRelay : undefined,
-                    });
+                    const result = await refreshBalance(account, { silent: true });
                     if (result?.status === 'ok') succeeded++;
                     else if (result) failed++;
                 }
@@ -1478,51 +1016,41 @@ function formatTime(timestamp) {
 
 function updateFormBalance() {
     const account = settings.accounts.find(item => item.id === $('#sam-account-id')?.value);
-    const enabled = hasBalanceToken(readForm());
-    const row = $('#sam-form-balance-row');
-    if (row) row.hidden = !enabled;
     const output = $('#sam-form-balance');
     if (output) {
-        output.textContent = !enabled ? '' : account ? formatBalance(account.balance)
+        output.textContent = account ? formatBalance(account.balance)
             : $('#sam-balance-mode')?.value === 'account' ? '账户余额：填写网站令牌后，保存时自动查询' : '账户余额：保存后可查询';
         output.dataset.state = account?.balance?.status || 'unknown';
-        output.title = enabled ? account?.balance?.message || '' : '';
+        output.title = account?.balance?.message || '';
     }
     const button = $('#sam-fetch-balance');
     if (button) {
-        button.title = isLocalTavern() ? '由本机酒馆后台查询' : '先浏览器直查，转发前询问';
-        button.disabled = !enabled || !account || account.balance?.status === 'loading';
+        button.disabled = !account || account.balance?.status === 'loading';
         setButtonContent(button,
             account?.balance?.status === 'loading' ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-wallet',
-            account?.balance?.status === 'loading' ? '查询中…'
-                : account?.balanceTokenStorage === 'encrypted' && !tokenVault?.unlocked ? '解锁查询' : '查询余额');
+            account?.balance?.status === 'loading' ? '查询中…' : '查询余额');
     }
 }
 
 function updateAccountBalanceUi(account) {
-    const enabled = hasBalanceToken(account);
-    updateBalanceControls();
     const card = $$('.sam-account-item').find(item => item.dataset.accountId === account.id);
     if (card) {
-        const row = $('.sam-balance-row', card);
-        if (row) row.hidden = !enabled;
         const output = $('.sam-account-balance', card);
         if (output) {
-            output.textContent = enabled ? formatBalance(account.balance) : '';
+            output.textContent = formatBalance(account.balance);
             output.dataset.state = account.balance?.status || 'unknown';
-            output.title = enabled ? account.balance?.message || '' : '';
+            output.title = account.balance?.message || '';
         }
         const button = $('button[data-action="balance"]', card);
         if (button) {
-            button.disabled = !enabled || account.balance?.status === 'loading';
+            button.disabled = account.balance?.status === 'loading';
             setButtonContent(button,
                 button.disabled ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-rotate',
-                button.disabled ? '查询中…'
-                    : account.balanceTokenStorage === 'encrypted' && !tokenVault?.unlocked ? '解锁查询' : '刷新余额');
+                button.disabled ? '查询中…' : '刷新余额');
         }
         const time = $('.sam-account-time', card);
         if (time) {
-            time.hidden = !enabled || !account.balance?.fetchedAt;
+            time.hidden = !account.balance?.fetchedAt;
             time.textContent = account.balance?.fetchedAt ? `更新于 ${formatTime(account.balance.fetchedAt)}` : '';
         }
     }
@@ -1610,9 +1138,6 @@ function createAccountCard(account) {
     confirmModel.setAttribute('aria-label', `确认 ${account.name} 的默认模型`);
     setButtonContent(confirmModel, 'fa-solid fa-check', '确认');
     modelControl.append(confirmModel);
-    const sourceHint = document.createElement('p');
-    sourceHint.className = 'sam-help sam-model-source';
-    modelControl.append(sourceHint);
     const modelsButton = document.createElement('button');
     modelsButton.type = 'button';
     modelsButton.className = 'menu_button sam-button sam-button-small';
@@ -1626,13 +1151,11 @@ function createAccountCard(account) {
     updateAccountModelControl(item, account);
     const balanceRow = document.createElement('div');
     balanceRow.className = 'sam-balance-row';
-    const showBalance = hasBalanceToken(account);
-    balanceRow.hidden = !showBalance;
     const balance = document.createElement('output');
     balance.className = 'sam-account-balance';
     balance.dataset.state = account.balance?.status || 'unknown';
-    balance.textContent = showBalance ? formatBalance(account.balance) : '';
-    balance.title = showBalance ? account.balance?.message || '' : '';
+    balance.textContent = formatBalance(account.balance);
+    balance.title = account.balance?.message || '';
     const balanceButton = document.createElement('button');
     balanceButton.type = 'button';
     balanceButton.className = 'menu_button sam-button sam-button-small';
@@ -1640,16 +1163,14 @@ function createAccountCard(account) {
     balanceButton.dataset.accountId = account.id;
     setButtonContent(balanceButton,
         account.balance?.status === 'loading' ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-rotate',
-        account.balance?.status === 'loading' ? '查询中…'
-            : account.balanceTokenStorage === 'encrypted' && !tokenVault?.unlocked ? '解锁查询' : '刷新余额');
+        account.balance?.status === 'loading' ? '查询中…' : '刷新余额');
     balanceButton.disabled = account.balance?.status === 'loading';
     balanceButton.setAttribute('aria-label', `查询 ${account.name} 的余额`);
-    balanceButton.title = isLocalTavern() ? '由本机酒馆后台查询' : '先浏览器直查，转发前询问';
     balanceRow.append(balance, balanceButton);
     item.append(balanceRow);
     const time = document.createElement('div');
     time.className = 'sam-account-time';
-    time.hidden = !showBalance || !account.balance?.fetchedAt;
+    time.hidden = !account.balance?.fetchedAt;
     time.textContent = account.balance?.fetchedAt ? `更新于 ${formatTime(account.balance.fetchedAt)}` : '';
     item.append(time);
 
@@ -2264,7 +1785,6 @@ function renderAccounts() {
     renderAccountFilters();
     updatePollingUi();
     updateFormBalance();
-    updateBalanceControls();
     if ($('#sam-account-sort')) $('#sam-account-sort').value = settings.accountSort;
     if ($('#sam-account-count')) $('#sam-account-count').textContent = `已保存 ${settings.accounts.length} 个`;
     if (!list) return;
@@ -2323,30 +1843,21 @@ function updateAccountSelectionUi() {
     updatePollingUi();
 }
 
-function saveAccountFromForm(event, preparedAccount) {
+function saveAccountFromForm(event) {
     event?.preventDefault();
     let account;
-    try { account = preparedAccount || readForm(); } catch (error) {
+    try { account = readForm(); } catch (error) {
         notify(error?.message || '表单读取失败。', 'error');
         return;
     }
     if (!account.name) return notify('请填写账户名称。', 'error');
     if (!account.baseUrl || !isHttpUrl(account.baseUrl)) return notify('请填写有效的 API 基础地址。', 'error');
     if (!account.apiKey) return notify('请填写 API Key。', 'error');
-    if (/[\u0000-\u001f<>]/.test(account.selectedModel)) return notify('请填写有效的模型 ID。', 'error');
     const index = settings.accounts.findIndex(item => item.id === account.id);
     const existing = index >= 0 ? settings.accounts[index] : null;
     const clearSelected = existing?.id === settings.selectedAccountId
         && !sameAppliedConnection(existing, account);
     account = normalizeAccount(account);
-    try {
-        const nextAccounts = index >= 0 ? settings.accounts.map((item, i) => i === index ? account : item)
-            : [...settings.accounts, account];
-        prepareCredentialSave(nextAccounts);
-    } catch (error) {
-        notify(error.message, 'error');
-        return;
-    }
     if (index >= 0) settings.accounts[index] = account;
     else settings.accounts.push(account);
     if (clearSelected) settings.selectedAccountId = '';
@@ -2355,32 +1866,16 @@ function saveAccountFromForm(event, preparedAccount) {
         settings.accountFilter = { type: 'group', group: account.group };
     }
     persist();
-    // A renamed account may no longer match the search used to open it.
-    // Keep the saved account visible when returning from its editor.
-    if (index >= 0 && accountEditPosition?.accountId === account.id
-        && !listedAccounts().some(item => item.id === account.id)) {
-        const search = $('#sam-account-search');
-        if (search) search.value = '';
-    }
     renderAccounts();
     clearForm();
     updatePollingState();
     notify(index >= 0 ? '账户已更新。' : '账户已保存。', 'success');
-    if (account.balanceMode === 'account' && hasBalanceToken(account) && account.balance.status !== 'ok'
-        && (account.balanceTokenStorage !== 'encrypted' || tokenVault?.unlocked)) {
+    if (account.balanceMode === 'account' && account.balanceAccessToken && account.balance.status !== 'ok') {
         void refreshBalance(account);
     }
 }
 
 function editAccount(account) {
-    const list = $('#sam-account-list');
-    const card = list && $$('.sam-account-item', list).find(item => item.dataset.accountId === account.id);
-    accountEditPosition = card ? {
-        accountId: account.id,
-        cardTop: card.getBoundingClientRect().top,
-        pageScroll: capturePageScroll(rootElement()),
-        listTop: list.scrollTop,
-    } : null;
     fillForm(account);
     $('#sam-name')?.focus({ preventScroll: true });
 }
@@ -2405,14 +1900,7 @@ function deleteAccount(account) {
     const visibleIndex = visibleAccounts.findIndex(item => item.id === account.id);
     const focusAccountId = visibleAccounts[visibleIndex + 1]?.id
         || visibleAccounts[visibleIndex - 1]?.id || '';
-    const nextAccounts = settings.accounts.filter(item => item.id !== account.id);
-    try {
-        if (deviceTokenStore) deviceTokenStore.synchronize(nextAccounts);
-    } catch (error) {
-        notify(error.message, 'error');
-        return;
-    }
-    settings.accounts = nextAccounts;
+    settings.accounts = settings.accounts.filter(item => item.id !== account.id);
     if (settings.selectedAccountId === account.id) {
         settings.selectedAccountId = '';
     }
@@ -2459,10 +1947,6 @@ async function applyToSillyTavern(account, options = {}) {
         notify('请先填写并保存有效的 API Key。', 'error');
         return false;
     }
-    try { assertCredentialRequest(account.baseUrl, apiKey, { credentialType: 'apiKey' }); } catch (error) {
-        notify(error.message, 'error');
-        return false;
-    }
     const main = document.querySelector('#main_api');
     const source = document.querySelector('#chat_completion_source');
     const modelSelect = document.querySelector('#model_custom_select');
@@ -2486,7 +1970,7 @@ async function applyToSillyTavern(account, options = {}) {
         if (event.result?.then) connectionResult = event.result;
     };
     try {
-        let baseUrl = connectionApiEndpoint(account);
+        let baseUrl = savedApiEndpoint(account);
         if (!baseUrl) {
             const snapshot = { ...account };
             const result = await resolveAccountEndpoint(snapshot);
@@ -2499,8 +1983,7 @@ async function applyToSillyTavern(account, options = {}) {
             }
             baseUrl = result.baseUrl;
             current.baseUrl = displayApiUrl(baseUrl);
-            current.resolvedBaseUrl = result.source === 'catalog' ? '' : baseUrl;
-            current.modelListSource = result.source === 'catalog' ? 'catalog' : '';
+            current.resolvedBaseUrl = baseUrl;
             current.selectedModel ||= result.models[0] || '';
             current.models = [...new Set([current.selectedModel, ...result.models].filter(Boolean))];
             account = current;
@@ -2664,7 +2147,7 @@ function nativeConnectionState() {
 
 function nativeConnectionMatches(account, connection = nativeConnectionState()) {
     return Boolean(account) && connection.main === 'openai' && connection.source === 'custom'
-        && connection.url === connectionApiEndpoint(account)
+        && connection.url === savedApiEndpoint(account)
         // SillyTavern clears the password field after storing the chat key.
         && (!connection.key || connection.key === account.apiKey);
 }
@@ -2829,23 +2312,10 @@ function bindEvents() {
         tab.focus();
     });
     const form = $('#sam-account-form');
-    form?.addEventListener('submit', saveAccountWithEncryption);
-    $('#sam-token-vault')?.addEventListener('click', () => {
-        if (!settings.tokenVault) void encryptExistingSystemTokens();
-        else if (tokenVault?.unlocked) lockTokenVault();
-        else void unlockTokenVault().catch(error => notify(error.message, 'error'));
-    });
-    $('#sam-encrypt-remaining')?.addEventListener('click', () => void encryptExistingSystemTokens());
-    $('#sam-restore-encrypted')?.addEventListener('click', restoreEncryptedRecovery);
-    rootElement()?.addEventListener('pointerdown', touchTokenVault, { passive: true });
-    rootElement()?.addEventListener('keydown', touchTokenVault, { passive: true });
-    globalThis.addEventListener?.('pagehide', lockTokenVault);
+    form?.addEventListener('submit', saveAccountFromForm);
     $('#sam-cancel-edit')?.addEventListener('click', () => clearForm());
     $('#sam-delete-account')?.addEventListener('click', deleteEditedAccount);
     $('#sam-fetch-models')?.addEventListener('click', fetchModelsForDraft);
-    $('#sam-model-select')?.addEventListener('change', () => {
-        if ($('#sam-model-manual')) $('#sam-model-manual').value = '';
-    });
     for (const selector of ['#sam-base-url', '#sam-api-key']) {
         $(selector)?.addEventListener('input', invalidateDraftConnection);
     }
@@ -2859,21 +2329,7 @@ function bindEvents() {
             notify('请先保存账户，再查询余额。', 'error');
             return;
         }
-        let draft = readForm();
-        if (!draft.apiKey) {
-            notify('请填写 API Key。', 'error');
-            return;
-        }
-        try {
-            const signature = credentialFormSignature();
-            const revision = formConnectionRevision;
-            draft = await prepareEncryptedAccount(draft);
-            if (revision !== formConnectionRevision || signature !== credentialFormSignature()) throw new Error('表单已改变，请重新查询。');
-            prepareCredentialSave(settings.accounts.map(item => item.id === id ? { ...item, ...draft } : item));
-        } catch (error) {
-            notify(error.message, 'error');
-            return;
-        }
+        const draft = readForm();
         const clearSelected = account.id === settings.selectedAccountId
             && !sameAppliedConnection(account, draft);
         Object.assign(account, {
@@ -2883,11 +2339,8 @@ function bindEvents() {
             apiKey: draft.apiKey,
             models: draft.models,
             selectedModel: draft.selectedModel,
-            modelListSource: draft.modelListSource,
             balanceMode: draft.balanceMode,
             balanceAccessToken: draft.balanceAccessToken,
-            balanceTokenStorage: draft.balanceTokenStorage,
-            balanceTokenCipher: draft.balanceTokenCipher,
             balanceUserId: draft.balanceUserId,
             balanceUrl: draft.balanceUrl,
             balancePath: draft.balancePath,
@@ -2896,9 +2349,9 @@ function bindEvents() {
         });
         if (clearSelected) {
             settings.selectedAccountId = '';
+            persist();
             renderAccounts();
         }
-        persist();
         await refreshBalance(account);
         updateFormBalance();
     });
@@ -2977,14 +2430,9 @@ function bindEvents() {
         updateBalanceSettingsUi();
         updateFormBalance();
     });
-    $('#sam-balance-token-storage')?.addEventListener('change', () => {
-        updateBalanceSettingsUi();
-    });
     $('#sam-balance-access-token')?.addEventListener('input', () => {
         if ($('#sam-clear-balance-token')) $('#sam-clear-balance-token').checked = false;
-        updateFormBalance();
     });
-    $('#sam-clear-balance-token')?.addEventListener('change', updateFormBalance);
     $('#sam-group-rename-start')?.addEventListener('click', () => setGroupRenameEditor(true));
     $('#sam-group-rename-cancel')?.addEventListener('click', () => setGroupRenameEditor(false));
     $('#sam-group-rename-confirm')?.addEventListener('click', submitGroupRename);
@@ -3037,7 +2485,7 @@ async function loadPanel() {
         if (!panel) {
             const panelUrl = new URL('./settings.html', import.meta.url);
             panelUrl.searchParams.set('v', EXTENSION_VERSION);
-            panelUrl.searchParams.set('rev', 'balance-options-20261110');
+            panelUrl.searchParams.set('rev', 'before-protection-20261110');
             const response = await fetch(panelUrl);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const template = document.createElement('template');
@@ -3068,18 +2516,7 @@ async function loadPanel() {
 async function init() {
     installScrollTopButton();
     settings = normalizeSettings(extension_settings[EXTENSION_NAME]);
-    tokenVault = createTokenVault(settings.tokenVault || null);
-    deviceTokenStore = createDeviceTokenStore({ scope: settings.deviceTokenScope });
-    for (const account of settings.accounts) {
-        if (account.balanceTokenStorage !== 'device') continue;
-        try {
-            account.balanceAccessToken = deviceTokenStore.token(account);
-        } catch (error) {
-            account.balanceAccessToken = '';
-            deviceTokenStorageError = error.message;
-        }
-    }
-    extension_settings[EXTENSION_NAME] = settingsForServer(settings);
+    extension_settings[EXTENSION_NAME] = settings;
     const loaded = await loadPanel();
     if (!loaded) {
         // Wait for the native API connection drawer when it mounts after imports.
