@@ -8,12 +8,12 @@
 
 import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
-import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.24&rev=before-protection-20261110';
-import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.24&rev=before-protection-20261110';
-import { createGenerationFetch } from './generation-monitor.js?v=1.8.24&rev=before-protection-20261110';
+import { identifyProvider, queryBalance, requestApiJson as requestJson } from './balance.js?v=1.8.25&rev=polling-order-20261113';
+import { displayApiUrl, requestApiJsonViaSillyTavern, resolveApiEndpoint, requestNativeModels } from './api-routing.js?v=1.8.25&rev=polling-order-20261113';
+import { createGenerationFetch } from './generation-monitor.js?v=1.8.25&rev=polling-order-20261113';
 
 const EXTENSION_NAME = 'sillytavern-api-manager';
-const EXTENSION_VERSION = '1.8.24';
+const EXTENSION_VERSION = '1.8.25';
 const SETTINGS_ROOT_ID = 'st-api-account-manager';
 const SETTINGS_VERSION = 3;
 const TRANSFER_FORMAT = 'sillytavern-api-account-manager';
@@ -1247,25 +1247,21 @@ function renderGroupSuggestions(selectedGroup) {
 }
 
 function filteredAccounts(accounts, filter) {
-    return accounts.filter(account => filter.type === 'all' || accountMatchesFilter(account, filter))
-        .sort((a, b) => (filter.type === 'group' ? 0 : Number(b.favorite) - Number(a.favorite))
-            || (a.group || '未分组').localeCompare(b.group || '未分组')
-            || a.name.localeCompare(b.name));
+    const matches = accounts.filter(account => filter.type === 'all' || accountMatchesFilter(account, filter));
+    // Share the selected order between the list and polling, without changing
+    // the saved insertion order or narrowing the locked polling scope by search.
+    const sortByAdded = settings.accountSort === 'added' || settings.accountSort === 'added-desc';
+    const direction = settings.accountSort.endsWith('-desc') ? -1 : 1;
+    if (sortByAdded && direction === -1) matches.reverse();
+    return matches.sort((a, b) => (filter.type === 'group' ? 0 : Number(b.favorite) - Number(a.favorite))
+        || (sortByAdded ? 0 : direction * accountNameCollator.compare(a.name, b.name)));
 }
 
 function listedAccounts() {
     const filter = settings.accountFilter;
     const search = asString($('#sam-account-search')?.value).trim().toLocaleLowerCase();
-    const accounts = settings.accounts.filter(account =>
-        (filter.type === 'all' || accountMatchesFilter(account, filter))
-        && (!search || account.name.toLocaleLowerCase().includes(search)));
-    // The saved array preserves insertion order, even for accounts without timestamps.
-    // Sort only this display copy so changing the view does not reorder polling.
-    const sortByAdded = settings.accountSort === 'added' || settings.accountSort === 'added-desc';
-    const direction = settings.accountSort.endsWith('-desc') ? -1 : 1;
-    if (sortByAdded && direction === -1) accounts.reverse();
-    return accounts.sort((a, b) => (filter.type === 'group' ? 0 : Number(b.favorite) - Number(a.favorite))
-        || (sortByAdded ? 0 : direction * accountNameCollator.compare(a.name, b.name)));
+    return filteredAccounts(settings.accounts, filter)
+        .filter(account => !search || account.name.toLocaleLowerCase().includes(search));
 }
 
 function renderAccountFilters() {
@@ -2485,7 +2481,7 @@ async function loadPanel() {
         if (!panel) {
             const panelUrl = new URL('./settings.html', import.meta.url);
             panelUrl.searchParams.set('v', EXTENSION_VERSION);
-            panelUrl.searchParams.set('rev', 'before-protection-20261110');
+            panelUrl.searchParams.set('rev', 'polling-order-20261113');
             const response = await fetch(panelUrl);
             if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const template = document.createElement('template');
